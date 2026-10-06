@@ -225,7 +225,7 @@ jobs:
 
           mark_ready() {
             local slot="${{ inputs.server_slot }}"
-            local marker="Server/Runtime/slot-" + "$slot" + "-ready"
+            local marker="Server/Runtime/slot-${slot}-ready"
             mkdir -p "$(dirname "$marker")"
             printf '%s
 ' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$marker"
@@ -236,9 +236,9 @@ jobs:
             git push origin "HEAD:${{ GITHUB_REF_NAME }}" || true
           }
 
-          clear_old_ready_marker() {
+          clear_old_ready_marker {
             local slot="${{ inputs.server_slot }}"
-            rm -f "Server/Runtime/slot-" + "$slot" + "-ready"
+            rm -f "Server/Runtime/slot-${slot}-ready"
           }
           cleanup_playit() {
             docker rm -f glide-playit >/dev/null 2>&1 || true
@@ -303,7 +303,7 @@ jobs:
 
             echo "Minecraft server: 127.0.0.1:25565"
             echo "Playit agent is running. The configured Playit Minecraft tunnel must target local port 25565."
-            mark_ready()
+            mark_ready
 
             while kill -0 "$SERVER_PID" 2>/dev/null; do
               ELAPSED="$(( $(date +%s) - START_EPOCH ))"
