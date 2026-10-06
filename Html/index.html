@@ -215,7 +215,7 @@
         </p>
 
         <div class="button-row">
-          <button id="checkGitHubBtn">Check GitHub</button>
+          <button id="checkGitHubBtn" type="button">Check GitHub</button>
         </div>
       </div>
 
@@ -227,8 +227,8 @@
       <div id="modePanel" class="box hidden">
         <h2>3. Start a server or client?</h2>
         <div class="button-row">
-          <button id="serverModeBtn" class="secondary">Server</button>
-          <button id="clientModeBtn">Client</button>
+          <button id="serverModeBtn" class="secondary" type="button">Server</button>
+          <button id="clientModeBtn" type="button">Client</button>
         </div>
       </div>
 
@@ -367,7 +367,7 @@ best-plugin</textarea>
         </div>
 
         <div class="button-row">
-          <button id="generateBtn">Generate config</button>
+          <button id="generateBtn" type="button">Generate config</button>
         </div>
       </div>
 
@@ -377,9 +377,9 @@ best-plugin</textarea>
         <pre id="configOutput"></pre>
 
         <div class="button-row">
-          <button id="launchBtn">Launch server/client</button>
-          <button id="downloadBtn" class="secondary">Download JSON</button>
-          <button id="copyBtn">Copy JSON</button>
+          <button id="launchBtn" type="button">Launch server/client</button>
+          <button id="downloadBtn" class="secondary" type="button">Download JSON</button>
+          <button id="copyBtn" type="button">Copy JSON</button>
         </div>
 
         <div class="status-box">
@@ -412,6 +412,17 @@ best-plugin</textarea>
         clientSession: null
       };
       const tokenInput = document.getElementById('tokenInput');
+      const checkGitHubBtn = document.getElementById('checkGitHubBtn');
+      checkGitHubBtn.addEventListener('click', () => {
+        const token = tokenInput.value.trim();
+        if (!token) {
+          alert('Add a GitHub token first.');
+          tokenInput.focus();
+          return;
+        }
+        checkGitHubBtn.disabled = true;
+        checkGitHubBtn.textContent = 'Checking...';
+      });
       const repoPanel = document.getElementById('repoPanel');
       const modePanel = document.getElementById('modePanel');
       const settingsPanel = document.getElementById('settingsPanel');
@@ -731,7 +742,7 @@ best-plugin</textarea>
         updatePluginList();
       });
 
-      document.getElementById('checkGitHubBtn').addEventListener('click', async () => {
+      checkGitHubBtn.addEventListener('click', async () => {
         const token = tokenInput.value.trim();
         if (!token) {
           alert('Add a GitHub token first.');
@@ -853,6 +864,8 @@ best-plugin</textarea>
       });
 
       loadToken();
+      checkGitHubBtn.disabled = false;
+      checkGitHubBtn.textContent = 'Check GitHub';
     </script>
   </body>
 </html>
