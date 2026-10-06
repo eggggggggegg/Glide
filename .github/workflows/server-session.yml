@@ -210,6 +210,31 @@ jobs:
             echo "GLIDE_WORLD_RESTORED=none"
           fi
 
+          git_push_with_retry() {
+            local attempt
+            for attempt in 1 2 3 4 5; do
+              if git push origin "HEAD:${GITHUB_REF_NAME}"; then
+                return 0
+              fi
+
+              echo "::warning::Git push failed on attempt $attempt; fetching ${GITHUB_REF_NAME} and rebasing before retry."
+              if ! git fetch origin "${GITHUB_REF_NAME}"; then
+                sleep 2
+                continue
+              fi
+
+              if ! git rebase "origin/${GITHUB_REF_NAME}"; then
+                echo "::error::Git rebase failed while synchronizing ${GITHUB_REF_NAME}."
+                git rebase --abort || true
+                return 1
+              fi
+              sleep 2
+            done
+
+            echo "::error::Could not push synchronized changes to ${GITHUB_REF_NAME} after 5 attempts."
+            return 1
+          }
+
           save_world() {
             local stamp="$(date -u +%Y%m%dT%H%M%SZ)"
             local save_dir="$VERSION_WORLD_ROOT/$stamp-${{ github.run_id }}"
@@ -231,7 +256,7 @@ jobs:
             git config user.email "glide-server-bot@users.noreply.github.com"
             git add "Server/World/${{ inputs.minecraft_version }}/$stamp-${{ github.run_id }}"
             git commit -m "Save server world $stamp" || true
-            git push origin "HEAD:${GITHUB_REF_NAME}" || true
+            git_push_with_retry
             echo "GLIDE_WORLD_SAVED=$save_dir"
           }
 
@@ -269,13 +294,15 @@ jobs:
             if [ -n "${{ inputs.handoff_id }}" ]; then
               marker="${marker}-${{ inputs.handoff_id }}"
             fi
-            mkdir -p "$(dirname "$marker")"
-            printf '%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$marker"
+            local marker_path="$GITHUB_WORKSPACE/$marker"
+            mkdir -p "$(dirname "$marker_path")"
+            printf '%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$marker_path"
             git config user.name "Glide Server Bot"
             git config user.email "glide-server-bot@users.noreply.github.com"
+            cd "$GITHUB_WORKSPACE"
             git add "$marker"
             git commit -m "Mark server slot $slot ready" || true
-            git push origin "HEAD:${GITHUB_REF_NAME}" || true
+            git_push_with_retry
           }
 
           cleanup_playit() {
