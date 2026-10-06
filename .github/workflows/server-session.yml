@@ -97,11 +97,26 @@ jobs:
           max-players=20
           EOF
 
-      - name: Install Java
+      - name: Detect and install required Java
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="${{ inputs.minecraft_version }}"
+          MANIFEST_URL="https://launchermeta.mojang.com/mc/game/version_manifest_v2.json"
+          VERSION_URL="$(curl -fsSL "$MANIFEST_URL" | python3 -c 'import json,sys; v=sys.argv[1]; d=json.load(sys.stdin); m=next(x for x in d["versions"] if x["id"]==v); print(m["url"])' "$VERSION")"
+          JAVA_MAJOR="$(curl -fsSL "$VERSION_URL" | python3 -c 'import json,sys,re; d=json.load(sys.stdin); a=d.get("javaVersion",{}).get("majorVersion"); print(a or "")')"
+          if [ -z "$JAVA_MAJOR" ]; then
+            echo "Minecraft $VERSION did not publish a required Java version; defaulting to Java 21."
+            JAVA_MAJOR=21
+          fi
+          echo "Minecraft $VERSION requires Java $JAVA_MAJOR"
+          echo "JAVA_MAJOR=$JAVA_MAJOR" >> "$GITHUB_ENV"
+
+      - name: Install required Java
         uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: '25'
+          java-version: '${{ env.JAVA_MAJOR }}'
 
       - name: Download server jar
         shell: bash
