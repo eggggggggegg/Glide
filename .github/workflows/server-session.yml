@@ -97,6 +97,9 @@ jobs:
           max-players=20
           EOF
 
+          echo "eula=true" > "$GITHUB_WORKSPACE/server/eula.txt"
+          echo "Accepted Minecraft EULA automatically for this server session."
+
       - name: Detect and install required Java
         shell: bash
         run: |
