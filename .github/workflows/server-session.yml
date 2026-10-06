@@ -113,7 +113,7 @@ jobs:
           MANIFEST_URL="https://launchermeta.mojang.com/mc/game/version_manifest_v2.json"
           JAR_URL="$(curl -fsSL "$MANIFEST_URL" | python3 -c 'import json,sys; data=json.load(sys.stdin); versions=data["versions"]; version=sys.argv[1]; match=next((v for v in versions if v["id"]==version), None); assert match, f"Version not found: {version}"; print(match["url"])' "$VERSION")"
           curl -fsSL "$JAR_URL" -o "$JAR_DIR/version.json"
-          SERVER_URL="$(python3 -c 'import json,sys; d=json.load(open(sys.argv[1], encoding="utf-8")); print(d["downloads"]["server"]["url"])' "$JAR_DIR/version.json")
+          SERVER_URL=$(python3 -c 'import json,sys; d=json.load(open(sys.argv[1], encoding="utf-8")); print(d["downloads"]["server"]["url"])' "$JAR_DIR/version.json")
           curl -fsSL "$SERVER_URL" -o "$JAR_DIR/server.jar"
           echo "GLIDE_SERVER_JAR=$JAR_DIR/server.jar"
 
