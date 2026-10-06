@@ -243,18 +243,23 @@ jobs:
               NEXT_SLOT="A"
             fi
 
+            HANDOFF_ID_VALUE="${{ github.run_id }}-${{ inputs.server_slot }}-$NEXT_SLOT"
+            echo "Dispatching server-session.yml on ${GITHUB_REF_NAME} with server_slot=$NEXT_SLOT handoff_id=$HANDOFF_ID_VALUE"
+
+            # Pass the next slot as an explicit workflow_dispatch input.
             gh workflow run server-session.yml \
               --ref "${GITHUB_REF_NAME}" \
-              -f minecraft_version="${{ inputs.minecraft_version }}" \
-              -f xmx_gb="${{ inputs.xmx_gb }}" \
-              -f online_mode="${{ inputs.online_mode }}" \
-              -f server_name="${{ inputs.server_name }}" \
-              -f server_description="${{ inputs.server_description }}" \
-              -f max_runtime_minutes="${{ inputs.max_runtime_minutes }}" \
-              -f server_slot="$NEXT_SLOT" \
-              -f handoff_id="${{ github.run_id }}-${{ inputs.server_slot }}-$NEXT_SLOT"
+              -f "minecraft_version=${{ inputs.minecraft_version }}" \
+              -f "xmx_gb=${{ inputs.xmx_gb }}" \
+              -f "online_mode=${{ inputs.online_mode }}" \
+              -f "server_name=${{ inputs.server_name }}" \
+              -f "server_description=${{ inputs.server_description }}" \
+              -f "max_runtime_minutes=${{ inputs.max_runtime_minutes }}" \
+              -f "server_slot=${NEXT_SLOT}" \
+              -f "handoff_id=${HANDOFF_ID_VALUE}"
 
             echo "GLIDE_NEXT_SLOT=$NEXT_SLOT"
+            echo "GLIDE_HANDOFF_ID=$HANDOFF_ID_VALUE"
             echo "GLIDE_HANDOFF_TRIGGERED=true"
           }
 
