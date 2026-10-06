@@ -413,16 +413,6 @@ best-plugin</textarea>
       };
       const tokenInput = document.getElementById('tokenInput');
       const checkGitHubBtn = document.getElementById('checkGitHubBtn');
-      checkGitHubBtn.addEventListener('click', () => {
-        const token = tokenInput.value.trim();
-        if (!token) {
-          alert('Add a GitHub token first.');
-          tokenInput.focus();
-          return;
-        }
-        checkGitHubBtn.disabled = true;
-        checkGitHubBtn.textContent = 'Checking...';
-      });
       const repoPanel = document.getElementById('repoPanel');
       const modePanel = document.getElementById('modePanel');
       const settingsPanel = document.getElementById('settingsPanel');
@@ -746,16 +736,23 @@ best-plugin</textarea>
         const token = tokenInput.value.trim();
         if (!token) {
           alert('Add a GitHub token first.');
+          tokenInput.focus();
           return;
         }
 
         state.token = token;
         saveToken();
+        checkGitHubBtn.disabled = true;
+        checkGitHubBtn.textContent = 'Checking...';
         repoPanel.classList.remove('hidden');
-        repoList.innerHTML = '<p class="muted">Checking repos...</p>';
+        repoList.innerHTML = '<p class="muted">Checking GitHub...</p>';
+
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 15000);
 
         try {
           const response = await fetch('https://api.github.com/user/repos?per_page=100', {
+            signal: controller.signal,
             headers: {
               Authorization: `Bearer ${token}`,
               Accept: 'application/vnd.github+json',
@@ -764,7 +761,12 @@ best-plugin</textarea>
           });
 
           if (!response.ok) {
-            throw new Error('GitHub request failed. Check the token and permissions.');
+            let detail = '';
+            try {
+              const data = await response.json();
+              detail = data.message ? ` ${data.message}` : '';
+            } catch (_) {}
+            throw new Error(`GitHub returned ${response.status}.${detail}`);
           }
 
           const repos = await response.json();
@@ -786,7 +788,7 @@ best-plugin</textarea>
                 <div class="repo-name">${repo.full_name}</div>
                 <div class="repo-desc">${repo.description || 'No description provided.'}</div>
               </div>
-              <button data-repo="${repo.full_name}" data-branch="${repo.default_branch || 'main'}">This is the Glide repo</button>
+              <button type="button" data-repo="${repo.full_name}" data-branch="${repo.default_branch || 'main'}">This is the Glide repo</button>
             `;
             repoList.appendChild(card);
           }
@@ -799,7 +801,14 @@ best-plugin</textarea>
             });
           });
         } catch (error) {
-          repoList.innerHTML = `<p class="warn">${error.message}</p>`;
+          const messageText = error.name === 'AbortError'
+            ? 'GitHub did not respond within 15 seconds. Check your internet connection or GitHub availability.'
+            : (error.message || 'GitHub check failed.');
+          repoList.innerHTML = `<p class="warn">${messageText}</p>`;
+        } finally {
+          clearTimeout(timeout);
+          checkGitHubBtn.disabled = false;
+          checkGitHubBtn.textContent = 'Check GitHub';
         }
       });
 
@@ -864,8 +873,6 @@ best-plugin</textarea>
       });
 
       loadToken();
-      checkGitHubBtn.disabled = false;
-      checkGitHubBtn.textContent = 'Check GitHub';
     </script>
   </body>
 </html>
