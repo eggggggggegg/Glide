@@ -65,7 +65,7 @@ on:
           - slim
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   session:
@@ -115,8 +115,14 @@ jobs:
         run: |
           set -euo pipefail
           echo GLIDE_STAGE=gfx-build
+          bridge_path="$GITHUB_WORKSPACE/target/release/libglide_gl_bridge.so"
+          if [ -f "$bridge_path" ]; then
+            echo "GLIDE_GL_BRIDGE=cache-hit"
+            echo "GLIDE_GL_BRIDGE_PATH=$bridge_path"
+            exit 0
+          fi
           cargo build --release --features vulkan --manifest-path glide-gl-bridge/Cargo.toml
-          test -f target/release/libglide_gl_bridge.so
+          test -f "$bridge_path"
           echo "GLIDE_GL_BRIDGE=ready"
       - name: Probe accelerated graphics backend
         shell: bash
@@ -418,6 +424,31 @@ jobs:
         with:
           distribution: temurin
           java-version: '8'
+
+      - name: Restore saved Minecraft state from repo
+        shell: bash
+        run: |
+          set -euo pipefail
+          SAVE_ROOT="$GITHUB_WORKSPACE/game/saving"
+          mkdir -p /home/runner/glide-minecraft
+          if [ -d "$SAVE_ROOT" ]; then
+            LATEST_SAVE="$(find "$SAVE_ROOT" -mindepth 1 -maxdepth 1 -type d | sort | tail -n 1 || true)"
+            if [ -n "$LATEST_SAVE" ]; then
+              shopt -s dotglob
+              for item in "$LATEST_SAVE"/*; do
+                [ -e "$item" ] || continue
+                name="$(basename "$item")"
+                target="/home/runner/glide-minecraft/$name"
+                rm -rf "$target"
+                cp -a "$item" "$target"
+              done
+              echo "GLIDE_SAVE_RESTORED=$LATEST_SAVE"
+            else
+              echo "GLIDE_SAVE_RESTORED=none"
+            fi
+          else
+            echo "GLIDE_SAVE_RESTORED=none"
+          fi
 
       - name: Install Java and Minecraft launcher
         shell: bash
@@ -729,6 +760,51 @@ jobs:
           echo "GLIDE_GL_PRELOAD_ACTIVE=true"
 
           python3 "$GITHUB_WORKSPACE/scripts/glide_launch.py"
+
+      - name: Save world and settings to repo
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          SAVE_NAME="${{ inputs.minecraft_version }}-${{ inputs.loader }}-${{ github.run_id }}"
+          SAVE_ROOT="$GITHUB_WORKSPACE/game/saving/$SAVE_NAME"
+          mkdir -p "$SAVE_ROOT"
+
+          for item in \
+            saves \
+            config \
+            resourcepacks \
+            shaderpacks \
+            mods \
+            datapacks \
+            options.txt \
+            optionsof.txt \
+            servers.dat \
+            launcher_profiles.json \
+            usercache.json \
+            server-resource-packs.json; do
+            src="/home/runner/glide-minecraft/$item"
+            if [ -e "$src" ]; then
+              mkdir -p "$(dirname "$SAVE_ROOT/$item")"
+              cp -a "$src" "$SAVE_ROOT/$item"
+            fi
+          done
+
+          if [ -d /home/runner/glide-minecraft/saves ]; then
+            find /home/runner/glide-minecraft/saves -maxdepth 2 -type f | sort | head -n 50
+          fi
+
+          git config user.name "Glide Save Bot"
+          git config user.email "glide-save-bot@users.noreply.github.com"
+          git add "game/saving/$SAVE_NAME"
+          if git diff --cached --quiet; then
+            echo "GLIDE_SAVE_COMMIT=skipped"
+            exit 0
+          fi
+          git commit -m "Save Glide session $SAVE_NAME"
+          git push origin "HEAD:${GITHUB_REF_NAME}"
+          echo "GLIDE_SAVE_COMMIT=$SAVE_NAME"
+          echo "GLIDE_SAVE_PATH=$SAVE_ROOT"
 
       - name: Keep Minecraft session alive
         shell: bash
