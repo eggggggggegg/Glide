@@ -280,9 +280,15 @@ if version == "1.12.2" and "_MixinBootstrap-1.1.0.jar" in mod_files:
 
 launch_version = version
 if loader in {"fabric", "legacy-fabric"}:
+    legacy_fabric = loader == "legacy-fabric"
     print("GLIDE_STAGE=fabric-install")
-    if version in {"1.12.2", "1.13", "1.13.1", "1.13.2"}:
+    if version in {"1.12.2", "1.13", "1.13.1", "1.13.2"} and not legacy_fabric:
         raise RuntimeError(f"Fabric requires Minecraft 1.14 or newer; requested {version}")
+
+    if legacy_fabric:
+        print("MINECRAFT_FABRIC_FLAVOR=legacy")
+    else:
+        print("MINECRAFT_FABRIC_FLAVOR=modern")
 
     print("Installing Fabric Loader through minecraft-launcher-lib...")
     minecraft_launcher_lib.fabric.install_fabric(version, minecraft_dir)
@@ -320,11 +326,15 @@ if loader in {"fabric", "legacy-fabric"}:
     profile_path = os.path.join(minecraft_dir, "versions", launch_version, f"{launch_version}.json")
     if not os.path.isfile(profile_path):
         raise RuntimeError(f"Fabric profile JSON was not created: {profile_path}")
-    print("MINECRAFT_FABRIC_FLAVOR=modern")
     print(f"MINECRAFT_LOADER_VERSION={launch_version}")
     print(f"MINECRAFT_FABRIC_PROFILE={profile_path}")
 elif loader in {"forge", "legacy-forge"}:
+    legacy_forge = loader == "legacy-forge"
     print("GLIDE_STAGE=forge-install")
+    if legacy_forge:
+        print("MINECRAFT_FORGE_FLAVOR=legacy")
+    else:
+        print("MINECRAFT_FORGE_FLAVOR=modern")
     forge_version = minecraft_launcher_lib.forge.find_forge_version(version)
     if not forge_version:
         raise RuntimeError(f"No Forge version found for Minecraft {version}")
