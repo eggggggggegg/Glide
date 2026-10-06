@@ -15,6 +15,28 @@ on:
         description: Maximum JVM heap in GB
         required: true
         type: number
+      render_preset:
+        description: Render preset for window size
+        required: true
+        default: balanced
+        type: choice
+        options:
+          - tiny
+          - low
+          - balanced
+          - high
+          - ultra
+          - custom
+      render_width:
+        description: Custom render width (used when render_preset=custom)
+        required: false
+        default: 1280
+        type: number
+      render_height:
+        description: Custom render height (used when render_preset=custom)
+        required: false
+        default: 720
+        type: number
       runner_label:
         description: Actions runner label; use a GPU-capable larger or self-hosted runner when available
         required: true
@@ -307,10 +329,15 @@ jobs:
           fi
           pactl info | head -n 20
           echo "PULSEAUDIO_READY=true"
-          pactl load-module module-null-sink sink_name=glide_game_sink sink_properties=device.description=GlideGame >/tmp/glide-pulse-sink-module.txt || true
+          pactl load-module module-virtual-sink sink_name=glide_game_sink sink_properties=device.description=GlideGame >/tmp/glide-pulse-sink-module.txt || true
           pactl set-default-sink glide_game_sink || true
+          pactl set-default-source glide_game_sink.monitor || true
+          pactl set-sink-volume glide_game_sink 100% || true
+          pactl suspend-sink glide_game_sink false || true
           pactl list short sinks
           pactl list short sources
+          echo "GLIDE_PULSE_SINK=glide_game_sink"
+          echo "GLIDE_PULSE_SOURCE=glide_game_sink.monitor"
           # h264enc is hardware-first in current Selkies/pixelflux builds:
           # NVIDIA uses NVENC and Intel/AMD use VA-API when available, with a software fallback.
           selkies --public --port=8080 --mode=websockets --enable-https=false --basic-auth-user=glide --basic-auth-password="$GLIDE_SELKIES_PASSWORD" --encoder=h264enc --enable-resize=false --raw-pointer-motion=true --video-framerate=60 --video-bitrate=8000 --congestion-control >/tmp/glide-selkies.log 2>&1 &
@@ -550,14 +577,24 @@ jobs:
           export GLIDE_MINECRAFT_VERSION="${{ inputs.minecraft_version }}"
           export GLIDE_MINECRAFT_XMX="${{ inputs.xmx_gb }}G"
           export GLIDE_MINECRAFT_LOADER="${{ inputs.loader }}"
+          export GLIDE_RESOLUTION_PRESET="${{ inputs.render_preset }}"
+          export GLIDE_RENDER_WIDTH="${{ inputs.render_width }}"
+          export GLIDE_RENDER_HEIGHT="${{ inputs.render_height }}"
           export GLIDE_AUTH_MODE="${{ inputs.auth_mode }}"
           export GLIDE_OFFLINE_USERNAME="${{ inputs.offline_username }}"
           export GLIDE_SKIN_MODEL="${{ inputs.skin_model }}"
           export XDG_RUNTIME_DIR="${GLIDE_XDG_RUNTIME_DIR:-/tmp/glide-runtime}"
           export PULSE_RUNTIME_PATH="${GLIDE_PULSE_RUNTIME_PATH:-$XDG_RUNTIME_DIR/pulse}"
           export PULSE_SERVER="${GLIDE_PULSE_SERVER:-unix:$PULSE_RUNTIME_PATH/native}"
+          export PULSE_LATENCY_MSEC="60"
+          export PULSE_SUSPEND_ON_IDLE="no"
+          export PULSE_SINK="${GLIDE_PULSE_SINK:-glide_game_sink}"
+          export PULSE_SOURCE="${GLIDE_PULSE_SOURCE:-glide_game_sink.monitor}"
+          export SDL_AUDIODRIVER="pulseaudio"
+          export AUDIODRIVER="pulseaudio"
           export ALSOFT_DRIVERS="pulse"
           echo "GLIDE_AUDIO_SERVER=$PULSE_SERVER"
+          echo "GLIDE_AUDIO_SINK=$PULSE_SINK"
           # Select Java for the requested Minecraft version.
           if [[ "$GLIDE_MINECRAFT_VERSION" == 1.12.* ]]; then
             if [ -n "${JAVA_HOME:-}" ] && [ -x "$JAVA_HOME/bin/java" ]; then
@@ -666,14 +703,17 @@ jobs:
           echo "MINECRAFT_LOADER=${{ inputs.loader }}"
           echo "MINECRAFT_XMX=$GLIDE_MINECRAFT_XMX"
 
-          case "${{ inputs.loader }}" in
-            vanilla|fabric|forge) ;;
+          loader_input="${{ inputs.loader }}"
+          loader_lower="${loader_input,,}"
+          case "$loader_lower" in
+            vanilla|fabric|forge|legacy-fabric|legacy-forge|quilt|neoforge) ;;
             *)
               echo "Unsupported loader: ${{ inputs.loader }}"
-              echo "Supported loaders: vanilla, fabric, forge"
+              echo "Supported loaders: vanilla, fabric, forge, legacy-fabric, legacy-forge, quilt, neoforge"
               exit 1
               ;;
           esac
+          export GLIDE_MINECRAFT_LOADER="$loader_lower"
 
           echo "GLIDE_STAGE=opengl-check"
           glxinfo -display "$DISPLAY" -B || true

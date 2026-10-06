@@ -1,9 +1,11 @@
 import os
 import json
+import shutil
 import subprocess
+import zipfile
 import minecraft_launcher_lib
 
-# python my beloved... <3
+
 def microsoft_device_login(client_id):
     """Authenticate a Microsoft account using device code and Minecraft/Xbox services."""
     import time
@@ -94,6 +96,54 @@ def offline_player_uuid(username):
     return uuid.UUID(bytes=hashlib.md5(profile_name).digest(), version=3)
 
 
+def normalize_loader_name(value):
+    aliases = {
+        "default": "vanilla",
+        "vanilla": "vanilla",
+        "fabric": "fabric",
+        "fabric-loader": "fabric",
+        "legacy-fabric": "legacy-fabric",
+        "legacyfabric": "legacy-fabric",
+        "forge": "forge",
+        "legacy-forge": "legacy-forge",
+        "legacyforge": "legacy-forge",
+        "quilt": "quilt",
+        "neo-forge": "neoforge",
+        "neoforge": "neoforge",
+    }
+    if value is None:
+        return "vanilla"
+    normalized = value.strip().lower().replace("_", "-").replace(" ", "-")
+    normalized = normalized.replace("loader", "").strip("-")
+    if normalized == "":
+        return "vanilla"
+    return aliases.get(normalized, normalized)
+
+
+def resolve_window_size(preset=None, width=None, height=None):
+    presets = {
+        "tiny": (640, 360),
+        "low": (854, 480),
+        "balanced": (1280, 720),
+        "high": (1600, 900),
+        "ultra": (1920, 1080),
+    }
+    key = (preset or os.environ.get("GLIDE_RESOLUTION_PRESET", "balanced")).strip().lower()
+    if key == "custom":
+        try:
+            target_width = int(width if width is not None else os.environ.get("GLIDE_RENDER_WIDTH", "1280"))
+            target_height = int(height if height is not None else os.environ.get("GLIDE_RENDER_HEIGHT", "720"))
+        except ValueError:
+            target_width, target_height = presets["balanced"]
+        return max(target_width, 1), max(target_height, 1)
+    chosen = presets.get(key, presets["balanced"])
+    if width is not None or height is not None:
+        target_width = int(width if width is not None else chosen[0])
+        target_height = int(height if height is not None else chosen[1])
+        return max(target_width, 1), max(target_height, 1)
+    return chosen
+
+
 def upload_skin(profile, skin_path, model):
     """Upload the repository skin to the authenticated Minecraft profile."""
     import requests
@@ -110,10 +160,16 @@ def upload_skin(profile, skin_path, model):
         raise RuntimeError(f"Skin upload failed ({response.status_code}): {response.text[:500]}")
     print(f"MINECRAFT_SKIN_APPLIED={os.path.basename(skin_path)}")
 
+
 version = os.environ["GLIDE_MINECRAFT_VERSION"]
 minecraft_dir = "/home/runner/glide-minecraft"
 xmx = os.environ["GLIDE_MINECRAFT_XMX"]
-loader = os.environ.get("GLIDE_MINECRAFT_LOADER", "vanilla").lower()
+loader = normalize_loader_name(os.environ.get("GLIDE_MINECRAFT_LOADER", "vanilla"))
+window_width, window_height = resolve_window_size(
+    os.environ.get("GLIDE_RESOLUTION_PRESET", "balanced"),
+    os.environ.get("GLIDE_RENDER_WIDTH"),
+    os.environ.get("GLIDE_RENDER_HEIGHT"),
+)
 
 print("GLIDE_STAGE=minecraft-download")
 print(f"Preparing official Minecraft {version} client files...")
@@ -141,9 +197,23 @@ os.makedirs(mods_dir, exist_ok=True)
 
 shaderpacks_dir = os.path.join(minecraft_dir, "shaderpacks")
 os.makedirs(shaderpacks_dir, exist_ok=True)
+resourcepacks_dir = os.path.join(minecraft_dir, "resourcepacks")
+os.makedirs(resourcepacks_dir, exist_ok=True)
 repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 direct_shader_dir = os.path.join(repo_root, "Shaders")
+resourcepack_source_dir = os.path.join(repo_root, "resourcepacks")
 shader_sources = []
+if os.path.isdir(resourcepack_source_dir):
+    for entry in sorted(os.listdir(resourcepack_source_dir)):
+        source = os.path.join(resourcepack_source_dir, entry)
+        if os.path.isdir(source):
+            target = os.path.join(resourcepacks_dir, entry)
+            if os.path.exists(target):
+                shutil.rmtree(target)
+            shutil.copytree(source, target)
+        elif entry.lower().endswith((".zip", ".mcpack", ".jar")):
+            shutil.copy2(source, os.path.join(resourcepacks_dir, entry))
+
 if os.path.isdir(direct_shader_dir):
     shader_sources.extend(
         os.path.join(direct_shader_dir, name)
@@ -209,7 +279,7 @@ if version == "1.12.2" and "_MixinBootstrap-1.1.0.jar" in mod_files:
     print(f"MINECRAFT_MIXINBOOTER={mixinbooter_legacy}")
 
 launch_version = version
-if loader == "fabric":
+if loader in {"fabric", "legacy-fabric"}:
     print("GLIDE_STAGE=fabric-install")
     if version in {"1.12.2", "1.13", "1.13.1", "1.13.2"}:
         raise RuntimeError(f"Fabric requires Minecraft 1.14 or newer; requested {version}")
@@ -253,7 +323,7 @@ if loader == "fabric":
     print("MINECRAFT_FABRIC_FLAVOR=modern")
     print(f"MINECRAFT_LOADER_VERSION={launch_version}")
     print(f"MINECRAFT_FABRIC_PROFILE={profile_path}")
-elif loader == "forge":
+elif loader in {"forge", "legacy-forge"}:
     print("GLIDE_STAGE=forge-install")
     forge_version = minecraft_launcher_lib.forge.find_forge_version(version)
     if not forge_version:
@@ -316,6 +386,29 @@ elif loader == "forge":
                 print(f"MINECRAFT_LEGACY_FORGE_JAR_COPIED={forge_version_jar}")
             print(f"MINECRAFT_LEGACY_FORGE_JAR_SIZE={os.path.getsize(forge_version_jar)}")
     print(f"MINECRAFT_LOADER_VERSION={launch_version}")
+elif loader == "quilt":
+    print("GLIDE_STAGE=quilt-install")
+    quilt_mod = getattr(minecraft_launcher_lib, "quilt", None)
+    if quilt_mod is None or not hasattr(quilt_mod, "install_quilt"):
+        raise RuntimeError("Quilt support is not available in this minecraft-launcher-lib build.")
+    quilt_mod.install_quilt(version, minecraft_dir)
+    installed = minecraft_launcher_lib.utils.get_installed_versions(minecraft_dir)
+    candidates = [item["id"] for item in installed if item.get("id", "").startswith("quilt-loader-")]
+    if not candidates:
+        raise RuntimeError(f"Quilt installation produced no quilt-loader profile for {version}")
+    launch_version = candidates[-1]
+    print(f"MINECRAFT_LOADER_VERSION={launch_version}")
+elif loader == "neoforge":
+    print("GLIDE_STAGE=neoforge-install")
+    neoforge_mod = getattr(minecraft_launcher_lib, "neoforge", None)
+    if neoforge_mod is None or not hasattr(neoforge_mod, "install_neoforge_version"):
+        raise RuntimeError("NeoForge support is not available in this minecraft-launcher-lib build.")
+    version_key = getattr(neoforge_mod, "find_neoforge_version", lambda _: None)(version)
+    if not version_key:
+        raise RuntimeError(f"No NeoForge version found for Minecraft {version}")
+    neoforge_mod.install_neoforge_version(version_key, minecraft_dir)
+    launch_version = getattr(neoforge_mod, "neoforge_to_installed_version", lambda _: version_key)(version_key)
+    print(f"MINECRAFT_LOADER_VERSION={launch_version}")
 
 print("GLIDE_STAGE=minecraft-options")
 options = minecraft_launcher_lib.utils.generate_test_options()
@@ -356,7 +449,7 @@ else:
     raise RuntimeError("GLIDE_AUTH_MODE must be either offline or microsoft.")
 
 
-native_source_version = version if loader == "fabric" else launch_version
+native_source_version = version if loader in {"fabric", "legacy-fabric", "quilt"} else launch_version
 natives_dir = os.path.join(
     minecraft_dir, "versions", native_source_version, "natives"
 )
@@ -505,7 +598,7 @@ else:
     command.insert(3, "-XX:+UseZGC")
     print("GLIDE_GC=ZGC")
 command.insert(5 if version == "1.12.2" else 4, "-XX:+DisableExplicitGC")
-command.extend(["--width", "854", "--height", "480"])
+command.extend(["--width", str(window_width), "--height", str(window_height)])
 
 print("MINECRAFT_COMMAND_READY=true")
 print("GLIDE_STAGE=minecraft-running")
@@ -521,9 +614,15 @@ runtime_env = {
     "XDG_RUNTIME_DIR": os.environ.get("XDG_RUNTIME_DIR", "/tmp/glide-runtime"),
     "PULSE_RUNTIME_PATH": os.environ.get("PULSE_RUNTIME_PATH", "/tmp/glide-runtime/pulse"),
     "PULSE_SERVER": os.environ.get("PULSE_SERVER", "unix:/tmp/glide-runtime/pulse/native"),
+    "PULSE_LATENCY_MSEC": os.environ.get("PULSE_LATENCY_MSEC", "60"),
+    "PULSE_SUSPEND_ON_IDLE": os.environ.get("PULSE_SUSPEND_ON_IDLE", "no"),
+    "PULSE_SINK": os.environ.get("PULSE_SINK", "glide_game_sink"),
+    "PULSE_SOURCE": os.environ.get("PULSE_SOURCE", "glide_game_sink.monitor"),
+    "SDL_AUDIODRIVER": os.environ.get("SDL_AUDIODRIVER", "pulseaudio"),
+    "AUDIODRIVER": os.environ.get("AUDIODRIVER", "pulseaudio"),
     "ALSOFT_DRIVERS": os.environ.get("ALSOFT_DRIVERS", "pulse"),
-    "GLIDE_RENDER_WIDTH": "854",
-    "GLIDE_RENDER_HEIGHT": "480",
+    "GLIDE_RENDER_WIDTH": str(window_width),
+    "GLIDE_RENDER_HEIGHT": str(window_height),
     "LD_PRELOAD": os.environ.get("LD_PRELOAD", ""),
 }
 
@@ -554,51 +653,50 @@ while True:
     print(f"MINECRAFT_RESTART_DELAY={restart_delay}")
     import time
     time.sleep(restart_delay)
-
     continue
 
 if code != 0:
-        print("MINECRAFT_CRASH_LOG_BEGIN=true")
-        try:
-            with open("/tmp/glide-minecraft.log", "r", encoding="utf-8", errors="replace") as crash_log:
-                lines = crash_log.readlines()
-            for line in lines[-300:]:
-                print(line, end="")
-        except OSError as error:
-            print(f"Could not read Minecraft log: {error}")
+    print("MINECRAFT_CRASH_LOG_BEGIN=true")
+    try:
+        with open("/tmp/glide-minecraft.log", "r", encoding="utf-8", errors="replace") as crash_log:
+            lines = crash_log.readlines()
+        for line in lines[-300:]:
+            print(line, end="")
+    except OSError as error:
+        print(f"Could not read Minecraft log: {error}")
 
-        crash_dir = os.path.join(minecraft_dir, "crash-reports")
-        if os.path.isdir(crash_dir):
-            reports = sorted(
-                (
-                    os.path.join(crash_dir, name)
-                    for name in os.listdir(crash_dir)
-                    if name.endswith(".txt")
-                ),
-                key=lambda path: os.path.getmtime(path),
-                reverse=True,
-            )
-            if reports:
-                latest_report = reports[0]
-                print(f"MINECRAFT_CRASH_REPORT={latest_report}")
+    crash_dir = os.path.join(minecraft_dir, "crash-reports")
+    if os.path.isdir(crash_dir):
+        reports = sorted(
+            (
+                os.path.join(crash_dir, name)
+                for name in os.listdir(crash_dir)
+                if name.endswith(".txt")
+            ),
+            key=lambda path: os.path.getmtime(path),
+            reverse=True,
+        )
+        if reports:
+            latest_report = reports[0]
+            print(f"MINECRAFT_CRASH_REPORT={latest_report}")
+            try:
+                with open(latest_report, "r", encoding="utf-8", errors="replace") as report:
+                    print(report.read())
+            except OSError as error:
+                print(f"Could not read crash report: {error}")
+
+    for root in (minecraft_dir, "/tmp"):
+        if not os.path.isdir(root):
+            continue
+        for name in sorted(os.listdir(root)):
+            if name.startswith("hs_err_pid") and name.endswith(".log"):
+                path = os.path.join(root, name)
+                print(f"JVM_FATAL_REPORT={path}")
                 try:
-                    with open(latest_report, "r", encoding="utf-8", errors="replace") as report:
+                    with open(path, "r", encoding="utf-8", errors="replace") as report:
                         print(report.read())
                 except OSError as error:
-                    print(f"Could not read crash report: {error}")
-
-        for root in (minecraft_dir, "/tmp"):
-            if not os.path.isdir(root):
-                continue
-            for name in sorted(os.listdir(root)):
-                if name.startswith("hs_err_pid") and name.endswith(".log"):
-                    path = os.path.join(root, name)
-                    print(f"JVM_FATAL_REPORT={path}")
-                    try:
-                        with open(path, "r", encoding="utf-8", errors="replace") as report:
-                            print(report.read())
-                    except OSError as error:
-                        print(f"Could not read JVM fatal report: {error}")
-        print("MINECRAFT_CRASH_LOG_END=true")
+                    print(f"Could not read JVM fatal report: {error}")
+    print("MINECRAFT_CRASH_LOG_END=true")
 if code != 0:
     raise SystemExit(code)
