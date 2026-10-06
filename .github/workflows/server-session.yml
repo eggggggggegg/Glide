@@ -143,18 +143,15 @@ jobs:
           mkdir -p "$WORLD_ROOT"
 
           LATEST_SAVE="$(find "$WORLD_ROOT" -mindepth 1 -maxdepth 1 -type d | sort | tail -n 1 || true)"
-          if [ -n "$LATEST_SAVE" ]; then
-            if [ -f "$LATEST_SAVE/eula.txt" ]; then
-              cp -f "$LATEST_SAVE/eula.txt" "$GITHUB_WORKSPACE/server/eula.txt"
-            else
-              echo "eula=true" > "$GITHUB_WORKSPACE/server/eula.txt"
-            fi
-          fi
           if [ -n "$LATEST_SAVE" ] && [ -d "$LATEST_SAVE/world" ]; then
+            echo "GLIDE_WORLD_MODE=restore"
             rm -rf "$GITHUB_WORKSPACE/server/world"
             cp -a "$LATEST_SAVE/world" "$GITHUB_WORKSPACE/server/world"
             echo "GLIDE_WORLD_RESTORED=$LATEST_SAVE"
           else
+            echo "No saved world found; Minecraft will generate a new world."
+            rm -rf "$GITHUB_WORKSPACE/server/world"
+            echo "GLIDE_WORLD_MODE=new"
             echo "GLIDE_WORLD_RESTORED=none"
           fi
 
@@ -171,10 +168,11 @@ jobs:
             if [ -f "$GITHUB_WORKSPACE/server/server.properties" ]; then
               cp -a "$GITHUB_WORKSPACE/server/server.properties" "$save_dir/server.properties"
             fi
+            if [ -d "$GITHUB_WORKSPACE/server/world" ]; then
+              cp -a "$GITHUB_WORKSPACE/server/world" "$save_dir/world"
+            fi
             if [ -f "$GITHUB_WORKSPACE/server/eula.txt" ]; then
               cp -a "$GITHUB_WORKSPACE/server/eula.txt" "$save_dir/eula.txt"
-            else
-              echo "eula=true" > "$save_dir/eula.txt"
             fi
             cd "$GITHUB_WORKSPACE"
             git config user.name "Glide Server Bot"
