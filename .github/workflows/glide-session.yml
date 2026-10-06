@@ -96,8 +96,8 @@ jobs:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-            target
-          key: ${{ runner.os }}-glide-cargo-${{ hashFiles('**/Cargo.lock', 'glide-gfx/src/**', 'glide-gl-bridge/src/**', 'glide-gfx/Cargo.toml', 'glide-gl-bridge/Cargo.toml') }}
+            Client/target
+          key: ${{ runner.os }}-glide-cargo-${{ hashFiles('Client/Cargo.lock', 'Client/glide-gfx/src/**', 'Client/glide-gl-bridge/src/**', 'Client/glide-gfx/Cargo.toml', 'Client/glide-gl-bridge/Cargo.toml') }}
           restore-keys: |
             ${{ runner.os }}-glide-cargo-
 
@@ -115,13 +115,13 @@ jobs:
         run: |
           set -euo pipefail
           echo GLIDE_STAGE=gfx-build
-          bridge_path="$GITHUB_WORKSPACE/target/release/libglide_gl_bridge.so"
+          bridge_path="$GITHUB_WORKSPACE/Client/target/release/libglide_gl_bridge.so"
           if [ -f "$bridge_path" ]; then
             echo "GLIDE_GL_BRIDGE=cache-hit"
             echo "GLIDE_GL_BRIDGE_PATH=$bridge_path"
             exit 0
           fi
-          cargo build --release --features vulkan --manifest-path glide-gl-bridge/Cargo.toml
+          cargo build --release --features vulkan --manifest-path Client/glide-gl-bridge/Cargo.toml
           test -f "$bridge_path"
           echo "GLIDE_GL_BRIDGE=ready"
       - name: Probe accelerated graphics backend
@@ -131,7 +131,7 @@ jobs:
           echo GLIDE_STAGE=gfx-probe
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends libvulkan1 mesa-vulkan-drivers vulkan-tools
-          cargo run --release --features vulkan --manifest-path glide-gfx/Cargo.toml --bin gfx_probe || true
+          cargo run --release --features vulkan --manifest-path Client/glide-gfx/Cargo.toml --bin gfx_probe || true
           vulkaninfo --summary 2>/dev/null | head -n 80 || true
           echo "GLIDE_VULKAN_DEVICES_BEGIN"
           vulkaninfo --summary 2>/dev/null | grep -E 'deviceName|deviceType|driverName|driverInfo' || true
@@ -462,8 +462,8 @@ jobs:
           mkdir -p /home/runner/glide-minecraft/mods
           mkdir -p /home/runner/glide-minecraft/datapacks
           shopt -s nullglob
-          MOD_SOURCE="mods/${{ inputs.loader }}"
-          DATAPACK_SOURCE="datapacks/${{ inputs.loader }}"
+          MOD_SOURCE="$GITHUB_WORKSPACE/Client/mods/${{ inputs.loader }}"
+          DATAPACK_SOURCE="$GITHUB_WORKSPACE/Client/datapacks/${{ inputs.loader }}"
 
           # Datapacks are world-scoped in Java Edition. Keep a loader-specific
           # staging directory, then copy valid packs into every existing world.
@@ -591,10 +591,10 @@ jobs:
         run: |
           set -euo pipefail
           echo GLIDE_STAGE=runtime-agent-build
-          chmod +x glide-runtime-agent/build.sh
-          ./glide-runtime-agent/build.sh
-          test -s glide-runtime-agent/build/glide-runtime-agent.jar
-          echo "GLIDE_RUNTIME_AGENT=$GITHUB_WORKSPACE/glide-runtime-agent/build/glide-runtime-agent.jar" >> "$GITHUB_ENV"
+          chmod +x "$GITHUB_WORKSPACE/Client/glide-runtime-agent/build.sh"
+          "$GITHUB_WORKSPACE/Client/glide-runtime-agent/build.sh"
+          test -s "$GITHUB_WORKSPACE/Client/glide-runtime-agent/build/glide-runtime-agent.jar"
+          echo "GLIDE_RUNTIME_AGENT=$GITHUB_WORKSPACE/Client/glide-runtime-agent/build/glide-runtime-agent.jar" >> "$GITHUB_ENV"
           echo "GLIDE_RUNTIME_PROBE=/tmp/glide-runtime.json" >> "$GITHUB_ENV"
           echo "GLIDE_RUNTIME_PROBE=/tmp/glide-runtime.json" >> "$GITHUB_ENV"
           echo "GLIDE_RUNTIME_AGENT_READY=true"
@@ -750,7 +750,7 @@ jobs:
           glxinfo -display "$DISPLAY" -B || true
 
           echo "GLIDE_STAGE=gl-bridge-preload"
-          BRIDGE="$GITHUB_WORKSPACE/target/release/libglide_gl_bridge.so"
+          BRIDGE="$GITHUB_WORKSPACE/Client/target/release/libglide_gl_bridge.so"
           if [ ! -f "$BRIDGE" ]; then
             echo "Missing Glide GL bridge: $BRIDGE"
             exit 1
@@ -759,7 +759,7 @@ jobs:
           echo "GLIDE_GL_PRELOAD=$BRIDGE"
           echo "GLIDE_GL_PRELOAD_ACTIVE=true"
 
-          python3 "$GITHUB_WORKSPACE/scripts/glide_launch.py"
+          python3 "$GITHUB_WORKSPACE/Client/scripts/glide_launch.py"
 
       - name: Save world and settings to repo
         if: always()

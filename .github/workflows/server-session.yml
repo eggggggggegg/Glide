@@ -1,0 +1,206 @@
+name: Glide Server Session
+
+on:
+  workflow_dispatch:
+    inputs:
+      minecraft_version:
+        description: Minecraft server version
+        required: true
+        default: 1.20.4
+        type: string
+      xmx_gb:
+        description: JVM heap size in GB
+        required: true
+        default: 4
+        type: number
+      online_mode:
+        description: Whether the server should require online auth
+        required: true
+        default: true
+        type: boolean
+      server_name:
+        description: Optional override for the server name in Server/Style/server.json
+        required: false
+        default: ""
+        type: string
+      server_description:
+        description: Optional override for the server description in Server/Style/server.json
+        required: false
+        default: ""
+        type: string
+      max_runtime_minutes:
+        description: Maximum runtime before a restart attempt; GitHub caps jobs at 360 minutes
+        required: true
+        default: 330
+        type: number
+
+permissions:
+  contents: write
+  actions: write
+
+jobs:
+  server:
+    runs-on: ubuntu-latest
+    timeout-minutes: ${{ inputs.max_runtime_minutes }}
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Read server style config
+        shell: bash
+        run: |
+          set -euo pipefail
+          SERVER_STYLE_FILE="$GITHUB_WORKSPACE/Server/Style/server.json"
+          if [ -f "$SERVER_STYLE_FILE" ]; then
+            python3 - "$SERVER_STYLE_FILE" <<'PY' >> "$GITHUB_ENV"
+            import json, sys
+            path = sys.argv[1]
+            with open(path, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+            print(f"GLIDE_SERVER_NAME={data.get('name', 'Glide Server')}")
+            print(f"GLIDE_SERVER_DESCRIPTION={data.get('description', 'A lightweight Minecraft server profile for your Glide setup.')}")
+            print(f"GLIDE_SERVER_MOTD={data.get('motd', data.get('name', 'Glide Server'))}")
+            PY
+          else
+            {
+              echo "GLIDE_SERVER_NAME=Glide Server"
+              echo "GLIDE_SERVER_DESCRIPTION=A lightweight Minecraft server profile for your Glide setup."
+              echo "GLIDE_SERVER_MOTD=Glide Server"
+            } >> "$GITHUB_ENV"
+          fi
+
+      - name: Prepare server files
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$GITHUB_WORKSPACE/server"
+          SERVER_NAME="${{ inputs.server_name }}"
+          SERVER_DESC="${{ inputs.server_description }}"
+          if [ -z "$SERVER_NAME" ]; then
+            SERVER_NAME="${GLIDE_SERVER_NAME:-Glide Server}"
+          fi
+          if [ -z "$SERVER_DESC" ]; then
+            SERVER_DESC="${GLIDE_SERVER_DESCRIPTION:-A lightweight Minecraft server profile for your Glide setup.}"
+          fi
+          echo "SERVER_NAME=$SERVER_NAME" >> "$GITHUB_ENV"
+          echo "SERVER_DESC=$SERVER_DESC" >> "$GITHUB_ENV"
+          echo "GLIDE_SERVER_NAME=$SERVER_NAME" >> "$GITHUB_ENV"
+          echo "GLIDE_SERVER_DESCRIPTION=$SERVER_DESC" >> "$GITHUB_ENV"
+
+          if [ -d "$GITHUB_WORKSPACE/Server/Icon" ]; then
+            cp -a "$GITHUB_WORKSPACE/Server/Icon/." "$GITHUB_WORKSPACE/server/"
+          fi
+          if [ -d "$GITHUB_WORKSPACE/Server/Plugins" ]; then
+            mkdir -p "$GITHUB_WORKSPACE/server/plugins"
+            cp -a "$GITHUB_WORKSPACE/Server/Plugins/." "$GITHUB_WORKSPACE/server/plugins/"
+          fi
+
+          cat > "$GITHUB_WORKSPACE/server/server.properties" <<EOF
+          level-name=world
+          gamemode=survival
+          difficulty=normal
+          allow-nether=true
+          online-mode=${{ inputs.online_mode }}
+          motd=${SERVER_DESC}
+          server-name=${SERVER_NAME}
+          spawn-protection=16
+          max-players=20
+          EOF
+
+      - name: Install Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Download server jar
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="${{ inputs.minecraft_version }}"
+          JAR_DIR="$GITHUB_WORKSPACE/server"
+          mkdir -p "$JAR_DIR"
+          MANIFEST_URL="https://launchermeta.mojang.com/mc/game/version_manifest_v2.json"
+          JAR_URL="$(curl -fsSL "$MANIFEST_URL" | python3 -c 'import json,sys; data=json.load(sys.stdin); versions=data["versions"]; version=sys.argv[1]; match=next((v for v in versions if v["id"]==version), None); assert match, f"Version not found: {version}"; print(match["url"])' "$VERSION")"
+          curl -fsSL "$JAR_URL" -o "$JAR_DIR/version.json"
+          SERVER_URL="$(python3 - "$JAR_DIR/version.json" <<'PY'
+            import json, sys
+            with open(sys.argv[1], 'r', encoding='utf-8') as f:
+                data = json.load(f)
+            print(data['downloads']['server']['url'])
+            PY
+          )"
+          curl -fsSL "$SERVER_URL" -o "$JAR_DIR/server.jar"
+          echo "GLIDE_SERVER_JAR=$JAR_DIR/server.jar"
+
+      - name: Start server
+        shell: bash
+        run: |
+          set -euo pipefail
+          WORLD_ROOT="$GITHUB_WORKSPACE/Server/World"
+          mkdir -p "$WORLD_ROOT"
+
+          LATEST_SAVE="$(find "$WORLD_ROOT" -mindepth 1 -maxdepth 1 -type d | sort | tail -n 1 || true)"
+          if [ -n "$LATEST_SAVE" ] && [ -d "$LATEST_SAVE/world" ]; then
+            rm -rf "$GITHUB_WORKSPACE/server/world"
+            cp -a "$LATEST_SAVE/world" "$GITHUB_WORKSPACE/server/world"
+            echo "GLIDE_WORLD_RESTORED=$LATEST_SAVE"
+          else
+            echo "GLIDE_WORLD_RESTORED=none"
+          fi
+
+          save_world() {
+            local stamp="$(date -u +%Y%m%dT%H%M%SZ)"
+            local save_dir="$WORLD_ROOT/$stamp-${{ github.run_id }}"
+            mkdir -p "$save_dir"
+            if [ -d "$GITHUB_WORKSPACE/server/world" ]; then
+              cp -a "$GITHUB_WORKSPACE/server/world" "$save_dir/world"
+            fi
+            if [ -d "$GITHUB_WORKSPACE/server/plugins" ]; then
+              cp -a "$GITHUB_WORKSPACE/server/plugins" "$save_dir/plugins"
+            fi
+            if [ -f "$GITHUB_WORKSPACE/server/server.properties" ]; then
+              cp -a "$GITHUB_WORKSPACE/server/server.properties" "$save_dir/server.properties"
+            fi
+            git config user.name "Glide Server Bot"
+            git config user.email "glide-server-bot@users.noreply.github.com"
+            git add "Server/World/$stamp-${{ github.run_id }}"
+            git commit -m "Save server world $stamp" || true
+            git push origin "HEAD:${GITHUB_REF_NAME}" || true
+            echo "GLIDE_WORLD_SAVED=$save_dir"
+          }
+
+          trigger_restart() {
+            export GH_TOKEN="${{ github.token }}"
+            gh workflow run server-session.yml \
+              --ref "${GITHUB_REF_NAME}" \
+              -f minecraft_version="${{ inputs.minecraft_version }}" \
+              -f xmx_gb="${{ inputs.xmx_gb }}" \
+              -f online_mode="${{ inputs.online_mode }}" \
+              -f server_name="${{ inputs.server_name }}" \
+              -f server_description="${{ inputs.server_description }}" \
+              -f max_runtime_minutes="${{ inputs.max_runtime_minutes }}"
+            echo "GLIDE_RESTART_TRIGGERED=true"
+          }
+
+          trap 'save_world' EXIT
+          cd "$GITHUB_WORKSPACE/server"
+          START_EPOCH="$(date +%s)"
+          RESTART_WINDOW="$(( ${{ inputs.max_runtime_minutes }} * 60 - 300 ))"
+          while true; do
+            java -Xmx${{ inputs.xmx_gb }}G -Xms512M -jar server.jar nogui &
+            SERVER_PID=$!
+            while kill -0 "$SERVER_PID" 2>/dev/null; do
+              ELAPSED="$(( $(date +%s) - START_EPOCH ))"
+              if [ "$ELAPSED" -ge "$RESTART_WINDOW" ]; then
+                echo "GLIDE_RESTART_SOON=true"
+                trigger_restart
+                kill "$SERVER_PID" 2>/dev/null || true
+                wait "$SERVER_PID" 2>/dev/null || true
+                exit 0
+              fi
+              sleep 60
+            done
+            wait "$SERVER_PID" 2>/dev/null || true
+            exit 0
+          done
