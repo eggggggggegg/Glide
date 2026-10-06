@@ -177,7 +177,7 @@ jobs:
           echo "Next slot $NEXT_SLOT tunnel: $NEXT_TUNNEL"
 
           LATEST_SAVE="$(find "$WORLD_ROOT" -mindepth 1 -maxdepth 1 -type d | sort | tail -n 1 || true)"
-          if [ -n "$LATEST_SAVE" ] && [ -d "$LATEST_SAVE/world" ]; then
+          if [ -n "$LATEST_SAVE" ] && [ -d "$LATEST_SAVE/world" ] && [ -s "$LATEST_SAVE/world/level.dat" ]; then
             echo "GLIDE_WORLD_MODE=restore"
             rm -rf "$GITHUB_WORKSPACE/server/world"
             cp -a "$LATEST_SAVE/world" "$GITHUB_WORKSPACE/server/world"
