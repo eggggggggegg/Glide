@@ -402,6 +402,7 @@ best-plugin</textarea>
 
     <script>
       const TOKEN_STORAGE_KEY = 'glide-github-token';
+      const TOKEN_STORAGE_MAX_LENGTH = 4096;
       const state = {
         token: '',
         selectedRepo: null,
@@ -436,8 +437,12 @@ best-plugin</textarea>
       }
 
       function saveToken() {
-        if (state.token) {
-          localStorage.setItem(TOKEN_STORAGE_KEY, state.token);
+        try {
+          if (state.token && state.token.length <= TOKEN_STORAGE_MAX_LENGTH) {
+            localStorage.setItem(TOKEN_STORAGE_KEY, state.token);
+          }
+        } catch (_) {
+          // Some downloaded/local HTML environments block or limit localStorage.
         }
       }
 
