@@ -215,7 +215,7 @@
         </p>
 
         <div class="button-row">
-          <button id="checkGitHubBtn" type="button">Check GitHub</button>
+          <button id="checkGitHubBtn" type="button" onclick="window.checkGlideGitHub()">Check GitHub</button>
         </div>
       </div>
 
@@ -732,7 +732,7 @@ best-plugin</textarea>
         updatePluginList();
       });
 
-      checkGitHubBtn.addEventListener('click', async () => {
+      window.checkGlideGitHub = async function () {
         const token = tokenInput.value.trim();
         if (!token) {
           alert('Add a GitHub token first.');
@@ -740,23 +740,17 @@ best-plugin</textarea>
           return;
         }
 
-        state.token = token;
-        saveToken();
         checkGitHubBtn.disabled = true;
         checkGitHubBtn.textContent = 'Checking...';
         repoPanel.classList.remove('hidden');
         repoList.innerHTML = '<p class="muted">Checking GitHub...</p>';
 
-        const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), 15000);
-
         try {
           const response = await fetch('https://api.github.com/user/repos?per_page=100', {
-            signal: controller.signal,
             headers: {
-              Authorization: `Bearer ${token}`,
+              Authorization: 'Bearer ' + token,
               Accept: 'application/vnd.github+json',
-              'X-GitHub-Api-Version': '2022-11-28',
+              'X-GitHub-Api-Version': '2022-11-28'
             }
           });
 
@@ -764,12 +758,15 @@ best-plugin</textarea>
             let detail = '';
             try {
               const data = await response.json();
-              detail = data.message ? ` ${data.message}` : '';
+              detail = data.message ? ' ' + data.message : '';
             } catch (_) {}
-            throw new Error(`GitHub returned ${response.status}.${detail}`);
+            throw new Error('GitHub returned ' + response.status + '.' + detail);
           }
 
           const repos = await response.json();
+          state.token = token;
+          saveToken();
+
           const glideRepos = repos
             .filter(repo => repo.name.toLowerCase().includes('glide'))
             .sort((a, b) => a.name.localeCompare(b.name));
@@ -783,34 +780,39 @@ best-plugin</textarea>
           for (const repo of glideRepos) {
             const card = document.createElement('div');
             card.className = 'repo-card';
-            card.innerHTML = `
-              <div>
-                <div class="repo-name">${repo.full_name}</div>
-                <div class="repo-desc">${repo.description || 'No description provided.'}</div>
-              </div>
-              <button type="button" data-repo="${repo.full_name}" data-branch="${repo.default_branch || 'main'}">This is the Glide repo</button>
-            `;
-            repoList.appendChild(card);
-          }
 
-          repoList.querySelectorAll('button').forEach(button => {
+            const info = document.createElement('div');
+            const name = document.createElement('div');
+            name.className = 'repo-name';
+            name.textContent = repo.full_name;
+            const desc = document.createElement('div');
+            desc.className = 'repo-desc';
+            desc.textContent = repo.description || 'No description provided.';
+            info.append(name, desc);
+
+            const button = document.createElement('button');
+            button.type = 'button';
+            button.textContent = 'This is the Glide repo';
             button.addEventListener('click', () => {
-              state.selectedRepo = button.getAttribute('data-repo');
-              state.defaultBranch = button.getAttribute('data-branch') || 'main';
+              state.selectedRepo = repo.full_name;
+              state.defaultBranch = repo.default_branch || 'main';
               modePanel.classList.remove('hidden');
             });
-          });
+
+            card.append(info, button);
+            repoList.appendChild(card);
+          }
         } catch (error) {
-          const messageText = error.name === 'AbortError'
-            ? 'GitHub did not respond within 15 seconds. Check your internet connection or GitHub availability.'
-            : (error.message || 'GitHub check failed.');
-          repoList.innerHTML = `<p class="warn">${messageText}</p>`;
+          repoList.innerHTML = '<p class="warn">' +
+            (error && error.message ? error.message : 'GitHub check failed.') +
+            '</p>';
         } finally {
-          clearTimeout(timeout);
           checkGitHubBtn.disabled = false;
           checkGitHubBtn.textContent = 'Check GitHub';
         }
-      });
+      };
+
+      checkGitHubBtn.addEventListener('click', window.checkGlideGitHub);
 
       document.getElementById('serverModeBtn').addEventListener('click', () => {
         state.selectedMode = 'server';
