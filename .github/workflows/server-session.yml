@@ -93,6 +93,8 @@ jobs:
           online-mode=${{ inputs.online_mode }}
           motd=${SERVER_DESC}
           server-name=${SERVER_NAME}
+          server-port=25565
+          server-ip=127.0.0.1
           spawn-protection=16
           max-players=20
           EOF
@@ -136,6 +138,8 @@ jobs:
           echo "GLIDE_SERVER_JAR=$JAR_DIR/server.jar"
 
       - name: Start server
+        env:
+          PLAYIT_SECRET: ${{ secrets.PLAYIT_SECRET }}
         shell: bash
         run: |
           set -euo pipefail
@@ -196,13 +200,62 @@ jobs:
             echo "GLIDE_RESTART_TRIGGERED=true"
           }
 
-          trap 'save_world' EXIT
+          cleanup_playit() {
+            docker rm -f glide-playit >/dev/null 2>&1 || true
+          }
+
+          trap 'cleanup_playit; save_world' EXIT
+
+          if [ -z "${PLAYIT_SECRET:-}" ]; then
+            echo "::error::PLAYIT_SECRET is not configured in GitHub Actions secrets."
+            exit 1
+          fi
           cd "$GITHUB_WORKSPACE/server"
           START_EPOCH="$(date +%s)"
           RESTART_WINDOW="$(( ${{ inputs.max_runtime_minutes }} * 60 - 300 ))"
           while true; do
+            docker rm -f glide-playit >/dev/null 2>&1 || true
+
             java -Xmx${{ inputs.xmx_gb }}G -Xms512M -jar server.jar nogui &
             SERVER_PID=$!
+
+            echo "Waiting for Minecraft to listen on 127.0.0.1:25565..."
+            for attempt in $(seq 1 60); do
+              if (echo >/dev/tcp/127.0.0.1/25565) >/dev/null 2>&1; then
+                echo "Minecraft is listening on 127.0.0.1:25565."
+                break
+              fi
+              if ! kill -0 "$SERVER_PID" 2>/dev/null; then
+                echo "::error::Minecraft exited before opening port 25565."
+                wait "$SERVER_PID" 2>/dev/null || true
+                exit 1
+              fi
+              if [ "$attempt" -eq 60 ]; then
+                echo "::error::Minecraft did not open port 25565 within 120 seconds."
+                tail -n 100 "$GITHUB_WORKSPACE/server/logs/latest.log" 2>/dev/null || true
+                exit 1
+              fi
+              sleep 2
+            done
+
+            echo "Starting Playit Docker agent..."
+            docker pull ghcr.io/playit-cloud/playit-agent:latest
+            docker run -d --name glide-playit --network host -e SECRET_KEY="$PLAYIT_SECRET" ghcr.io/playit-cloud/playit-agent:latest
+
+            sleep 8
+            echo "--- Playit agent status ---"
+            docker ps --filter name=glide-playit --format 'status={{.Status}}'
+            echo "--- Playit agent logs ---"
+            docker logs --tail 100 glide-playit 2>&1 || true
+
+            if ! docker ps --format '{{.Names}}' | grep -qx 'glide-playit'; then
+              echo "::error::Playit Docker agent stopped immediately."
+              exit 1
+            fi
+
+            echo "Minecraft server: 127.0.0.1:25565"
+            echo "Playit agent is running. The configured Playit Minecraft tunnel must target local port 25565."
+
             while kill -0 "$SERVER_PID" 2>/dev/null; do
               ELAPSED="$(( $(date +%s) - START_EPOCH ))"
               if [ "$ELAPSED" -ge "$RESTART_WINDOW" ]; then
