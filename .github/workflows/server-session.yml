@@ -52,16 +52,8 @@ jobs:
           set -euo pipefail
           SERVER_STYLE_FILE="$GITHUB_WORKSPACE/Server/Style/server.json"
           if [ -f "$SERVER_STYLE_FILE" ]; then
-            python3 - "$SERVER_STYLE_FILE" <<'PY' >> "$GITHUB_ENV"
-            import json, sys
-            path = sys.argv[1]
-            with open(path, 'r', encoding='utf-8') as f:
-                data = json.load(f)
-            print(f"GLIDE_SERVER_NAME={data.get('name', 'Glide Server')}")
-            print(f"GLIDE_SERVER_DESCRIPTION={data.get('description', 'A lightweight Minecraft server profile for your Glide setup.')}")
-            print(f"GLIDE_SERVER_MOTD={data.get('motd', data.get('name', 'Glide Server'))}")
-            PY
-          else
+          if [ -f "$SERVER_STYLE_FILE" ]; then
+            python3 -c 'import json,sys; d=json.load(open(sys.argv[1], encoding="utf-8")); print("GLIDE_SERVER_NAME="+d.get("name","Glide Server")); print("GLIDE_SERVER_DESCRIPTION="+d.get("description","A lightweight Minecraft profile for your Glide setup.")); print("GLIDE_SERVER_MOTD="+d.get("motd",d.get("name","Glide Server")))' "$SERVER_STYLE_FILE" >> "$GITHUB_ENV"
             {
               echo "GLIDE_SERVER_NAME=Glide Server"
               echo "GLIDE_SERVER_DESCRIPTION=A lightweight Minecraft server profile for your Glide setup."
