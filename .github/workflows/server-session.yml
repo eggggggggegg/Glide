@@ -187,11 +187,22 @@ jobs:
           echo "World storage for Minecraft $MINECRAFT_VERSION: $VERSION_WORLD_ROOT"
 
           LATEST_SAVE="$(find "$VERSION_WORLD_ROOT" -mindepth 1 -maxdepth 1 -type d | sort | tail -n 1 || true)"
-          if [ -n "$LATEST_SAVE" ] && [ -d "$LATEST_SAVE/world" ] && [ -s "$LATEST_SAVE/world/level.dat" ]; then
-            echo "GLIDE_WORLD_MODE=restore"
-            rm -rf "$GITHUB_WORKSPACE/server/world"
-            cp -a "$LATEST_SAVE/world" "$GITHUB_WORKSPACE/server/world"
-            echo "GLIDE_WORLD_RESTORED=$LATEST_SAVE"
+          if [ -n "$LATEST_SAVE" ] && [ -d "$LATEST_SAVE/world" ]; then
+            # Older runs accidentally nested world/world/... by copying the world twice.
+            # Find the actual world root by locating the deepest directory containing level.dat.
+            SAVED_WORLD="$(find "$LATEST_SAVE/world" -type f -name level.dat -printf '%d %h\n' 2>/dev/null | sort -nr | head -n 1 | cut -d' ' -f2- || true)"
+            if [ -n "$SAVED_WORLD" ] && [ -s "$SAVED_WORLD/level.dat" ]; then
+              echo "GLIDE_WORLD_MODE=restore"
+              rm -rf "$GITHUB_WORKSPACE/server/world"
+              cp -a "$SAVED_WORLD" "$GITHUB_WORKSPACE/server/world"
+              echo "GLIDE_WORLD_RESTORED=$LATEST_SAVE"
+              echo "GLIDE_WORLD_SOURCE=$SAVED_WORLD"
+            else
+              echo "Latest save has no valid level.dat; Minecraft will generate a new world."
+              rm -rf "$GITHUB_WORKSPACE/server/world"
+              echo "GLIDE_WORLD_MODE=new"
+              echo "GLIDE_WORLD_RESTORED=none"
+            fi
           else
             echo "No saved world found for Minecraft $MINECRAFT_VERSION; Minecraft will generate a new world."
             rm -rf "$GITHUB_WORKSPACE/server/world"
@@ -211,9 +222,6 @@ jobs:
             fi
             if [ -f "$GITHUB_WORKSPACE/server/server.properties" ]; then
               cp -a "$GITHUB_WORKSPACE/server/server.properties" "$save_dir/server.properties"
-            fi
-            if [ -d "$GITHUB_WORKSPACE/server/world" ]; then
-              cp -a "$GITHUB_WORKSPACE/server/world" "$save_dir/world"
             fi
             if [ -f "$GITHUB_WORKSPACE/server/eula.txt" ]; then
               cp -a "$GITHUB_WORKSPACE/server/eula.txt" "$save_dir/eula.txt"
