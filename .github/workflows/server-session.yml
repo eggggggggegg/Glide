@@ -427,7 +427,7 @@ jobs:
                   cleanup_playit
                   wait "$SERVER_PID" 2>/dev/null || true
                   SERVER_PID=""
-                  exit 0exit 0
+                  exit 0
                   fi
                 fi
                 sleep 3
