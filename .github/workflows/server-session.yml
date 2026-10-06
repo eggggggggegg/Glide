@@ -221,7 +221,7 @@ jobs:
             local slot="${{ inputs.server_slot }}"
             local marker="Server/Runtime/slot-${slot}-ready"
             mkdir -p "$(dirname "$marker")"
-            printf '%s\\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$marker"
+            printf '%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$marker"
             git config user.name "Glide Server Bot"
             git config user.email "glide-server-bot@users.noreply.github.com"
             git add "$marker"
