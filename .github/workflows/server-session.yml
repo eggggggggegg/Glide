@@ -369,32 +369,65 @@ jobs:
                   if git show "origin/${GITHUB_REF_NAME}:$NEXT_READY_MARKER" >/dev/null 2>&1; then
                   echo "Slot $NEXT_SLOT is ready at $NEXT_TUNNEL."
                   echo "Preparing players for transfer to $TARGET_HOST:$TARGET_PORT..."
+
+                  # Keep the warning visible for the full countdown.
+                  send_command "title @a times 5 100 10"
                   send_command "title @a title {text:'Swapping...'}"
                   sleep 10
+
                   echo "Transferring all players to $TARGET_HOST:$TARGET_PORT..."
                   send_command "say The server is transferring you to the next server..."
                   send_command "transfer $TARGET_HOST $TARGET_PORT @a"
                   echo "::notice::Players were instructed to transfer to slot $NEXT_SLOT at $NEXT_TUNNEL."
 
-                  # Keep retrying the transfer for any players who did not move.
-                  # Only stop once Minecraft reports that no players remain.
-                  remaining_elapsed=0
-                  while kill -0 "$SERVER_PID" 2>/dev/null && [ "$remaining_elapsed" -lt 60 ]; do
-                    send_command "execute as @a run transfer $TARGET_HOST $TARGET_PORT"
-                    send_command "execute unless entity @a run stop"
-                    sleep 5
-                    remaining_elapsed="$((remaining_elapsed + 5))"
+                  # /transfer starts a new client connection to B. A player leaving
+                  # @a does not prove that the new connection has finished, so A
+                  # must remain alive throughout the transfer and grace period.
+                  transfer_wait_elapsed=0
+                  players_left=false
+                  while kill -0 "$SERVER_PID" 2>/dev/null && [ "$transfer_wait_elapsed" -lt 90 ]; do
+                    if grep -q "There are 0 of a max" "$GITHUB_WORKSPACE/server/logs/latest.log" 2>/dev/null; then
+                      players_left=true
+                      echo "No players remain on slot ${{ inputs.server_slot }}; allowing the transfer connection to settle."
+                      break
+                    fi
+                    sleep 3
+                    transfer_wait_elapsed="$((transfer_wait_elapsed + 3))"
+                  done
+
+                  if [ "$players_left" != true ]; then
+                    echo "::warning::Could not confirm that all players left slot ${{ inputs.server_slot }} within 90 seconds."
+                    echo "Keeping the old server and Playit tunnel alive instead of forcing a disconnect."
+                    tail -n 80 "$GITHUB_WORKSPACE/server/logs/latest.log" 2>/dev/null || true
+                    exit 1
+                  fi
+
+                  TRANSFER_GRACE_SECONDS=20
+                  echo "Waiting ${TRANSFER_GRACE_SECONDS}s before shutting down slot ${{ inputs.server_slot }}."
+                  sleep "$TRANSFER_GRACE_SECONDS"
+
+                  # Stop Minecraft cleanly first. Keep Playit alive until the
+                  # process has actually exited so the old relay is not torn down
+                  # while the transfer is still settling.
+                  echo "Stopping old Minecraft server after transfer grace period."
+                  send_command "save-all flush"
+                  sleep 3
+                  send_command "stop"
+
+                  STOP_DEADLINE="$(( $(date +%s) + 30 ))"
+                  while kill -0 "$SERVER_PID" 2>/dev/null && [ "$(date +%s)" -lt "$STOP_DEADLINE" ]; do
+                    sleep 1
                   done
 
                   if kill -0 "$SERVER_PID" 2>/dev/null; then
-                    echo "::error::Players remained on slot ${{ inputs.server_slot }} after 60 seconds; leaving the old server running instead of kicking them."
+                    echo "::error::Old Minecraft server did not stop cleanly after transfer; leaving Playit available."
                     exit 1
                   fi
 
                   cleanup_playit
                   wait "$SERVER_PID" 2>/dev/null || true
                   SERVER_PID=""
-                  exit 0
+                  exit 0exit 0
                   fi
                 fi
                 sleep 3
