@@ -352,11 +352,26 @@ jobs:
                 if git show "origin/${GITHUB_REF_NAME}:$NEXT_READY_MARKER" >/dev/null 2>&1; then
                   echo "Slot $NEXT_SLOT is ready at $NEXT_TUNNEL."
                   echo "Transferring all players to $TARGET_HOST:$TARGET_PORT..."
+                  send_command "say The server is transferring you to the next server..."
                   send_command "transfer $TARGET_HOST $TARGET_PORT @a"
                   echo "::notice::Players were instructed to transfer to slot $NEXT_SLOT at $NEXT_TUNNEL."
-                  sleep 15
+
+                  # Keep retrying the transfer for any players who did not move.
+                  # Only stop once Minecraft reports that no players remain.
+                  remaining_elapsed=0
+                  while kill -0 "$SERVER_PID" 2>/dev/null && [ "$remaining_elapsed" -lt 60 ]; do
+                    send_command "execute as @a run transfer $TARGET_HOST $TARGET_PORT"
+                    send_command "execute unless entity @a run stop"
+                    sleep 5
+                    remaining_elapsed="$((remaining_elapsed + 5))"
+                  done
+
+                  if kill -0 "$SERVER_PID" 2>/dev/null; then
+                    echo "::error::Players remained on slot ${{ inputs.server_slot }} after 60 seconds; leaving the old server running instead of kicking them."
+                    exit 1
+                  fi
+
                   cleanup_playit
-                  kill "$SERVER_PID" 2>/dev/null || true
                   wait "$SERVER_PID" 2>/dev/null || true
                   SERVER_PID=""
                   exit 0
