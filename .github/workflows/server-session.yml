@@ -128,7 +128,7 @@ jobs:
             with open(sys.argv[1], 'r', encoding='utf-8') as f:
                 data = json.load(f)
             print(data['downloads']['server']['url'])
-            PY
+          PY
           )"
           curl -fsSL "$SERVER_URL" -o "$JAR_DIR/server.jar"
           echo "GLIDE_SERVER_JAR=$JAR_DIR/server.jar"
