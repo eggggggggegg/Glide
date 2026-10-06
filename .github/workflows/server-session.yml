@@ -258,12 +258,13 @@ jobs:
           CONSOLE_FIFO="$GITHUB_WORKSPACE/server/minecraft-console.fifo"
           rm -f "$CONSOLE_FIFO"
           mkfifo "$CONSOLE_FIFO"
+          exec 9<>"$CONSOLE_FIFO"
 
           send_command() {
-            printf '%s\n' "$1" > "$CONSOLE_FIFO"
+            printf '%s\n' "$1" >&9
           }
 
-          trap 'cleanup_playit; rm -f "$CONSOLE_FIFO"; if [ -n "${SERVER_PID:-}" ] && kill -0 "$SERVER_PID" 2>/dev/null; then kill "$SERVER_PID" 2>/dev/null || true; wait "$SERVER_PID" 2>/dev/null || true; fi' EXIT
+          trap 'cleanup_playit; exec 9>&- 2>/dev/null || true; exec 9<&- 2>/dev/null || true; rm -f "$CONSOLE_FIFO"; if [ -n "${SERVER_PID:-}" ] && kill -0 "$SERVER_PID" 2>/dev/null; then kill "$SERVER_PID" 2>/dev/null || true; wait "$SERVER_PID" 2>/dev/null || true; fi' EXIT
 
           if [ -z "${PLAYIT_SECRET:-}" ]; then
             echo "::error::PLAYIT_SECRET is not configured in GitHub Actions secrets."
@@ -281,7 +282,7 @@ jobs:
 
           docker rm -f glide-playit >/dev/null 2>&1 || true
 
-          java -Xmx${{ inputs.xmx_gb }}G -Xms512M -jar server.jar nogui < "$CONSOLE_FIFO" &
+          java -Xmx${{ inputs.xmx_gb }}G -Xms512M -jar server.jar nogui <&9 &
           SERVER_PID=$!
 
           echo "Waiting for Minecraft to listen on 127.0.0.1:25565..."
