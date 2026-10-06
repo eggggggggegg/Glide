@@ -41,7 +41,7 @@ permissions:
 jobs:
   server:
     runs-on: ubuntu-latest
-    timeout-minutes: ${{ inputs.max_runtime_minutes }}
+    timeout-minutes: 360
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
