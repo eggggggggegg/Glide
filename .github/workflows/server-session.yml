@@ -6,7 +6,7 @@ on:
       minecraft_version:
         description: Minecraft server version
         required: true
-        default: 1.20.4
+        default: 1.20.5
         type: string
       xmx_gb:
         description: JVM heap size in GB
@@ -105,6 +105,7 @@ jobs:
           server-ip=127.0.0.1
           spawn-protection=16
           max-players=20
+          accepts-transfers=true
           EOF
 
           echo "eula=true" > "$GITHUB_WORKSPACE/server/eula.txt"
@@ -152,7 +153,28 @@ jobs:
         run: |
           set -euo pipefail
           WORLD_ROOT="$GITHUB_WORKSPACE/Server/World"
+          TUNNEL_CONFIG="$GITHUB_WORKSPACE/Server/Runtime/tunnels.txt"
           mkdir -p "$WORLD_ROOT"
+          if [ ! -f "$TUNNEL_CONFIG" ]; then
+            echo "::error::Missing $TUNNEL_CONFIG"
+            exit 1
+          fi
+          TUNNEL_A="$(grep '^A=' "$TUNNEL_CONFIG" | head -n 1 | cut -d= -f2-)"
+          TUNNEL_B="$(grep '^B=' "$TUNNEL_CONFIG" | head -n 1 | cut -d= -f2-)"
+          if [ -z "$TUNNEL_A" ] || [ -z "$TUNNEL_B" ]; then
+            echo "::error::Both A and B tunnel endpoints are required"
+            exit 1
+          fi
+          if [ "${{ inputs.server_slot }}" = "A" ]; then
+            NEXT_SLOT="B"
+            NEXT_TUNNEL="$TUNNEL_B"
+          else
+            NEXT_SLOT="A"
+            NEXT_TUNNEL="$TUNNEL_A"
+          fi
+          TARGET_HOST="${NEXT_TUNNEL%:*}"
+          TARGET_PORT="${NEXT_TUNNEL##*:}"
+          echo "Next slot $NEXT_SLOT tunnel: $NEXT_TUNNEL"
 
           LATEST_SAVE="$(find "$WORLD_ROOT" -mindepth 1 -maxdepth 1 -type d | sort | tail -n 1 || true)"
           if [ -n "$LATEST_SAVE" ] && [ -d "$LATEST_SAVE/world" ]; then
