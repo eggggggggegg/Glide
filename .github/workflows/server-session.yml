@@ -327,33 +327,32 @@ jobs:
             if [ "$ELAPSED" -ge "$HANDOFF_AFTER_SECONDS" ]; then
               echo "GLIDE_HANDOFF_SOON=true"
               echo "The server is preparing to swap. Progress may be lost from this point further."
-              echo "Stopping the current Playit agent before handing the tunnel to the next runner."
-
-              # Minecraft is stopped first so its normal shutdown flushes the world.
-              cleanup_playit
-              kill "$SERVER_PID" 2>/dev/null || true
-              wait "$SERVER_PID" 2>/dev/null || true
-              SERVER_PID=""
-
-              echo "Saving the clean world snapshot for the next server slot..."
+              send_command "save-all flush"
+              sleep 5
               save_world
 
+              rm -f "Server/Runtime/slot-$NEXT_SLOT-ready"
+              git add "Server/Runtime/slot-$NEXT_SLOT-ready" 2>/dev/null || true
+              git commit -m "Clear server slot $NEXT_SLOT ready marker" || true
+              git push origin "HEAD:${GITHUB_REF_NAME}" || true
+
+              echo "Starting slot $NEXT_SLOT before stopping this server."
               trigger_handoff
 
-              if [ "${{ inputs.server_slot }}" = "A" ]; then
-                NEXT_SLOT="B"
-              else
-                NEXT_SLOT="A"
-              fi
-
               NEXT_READY_MARKER="Server/Runtime/slot-$NEXT_SLOT-ready"
-              echo "Waiting for slot $NEXT_SLOT to start its Minecraft server and connect its Playit agent..."
-
               elapsed=0
               while [ "$elapsed" -lt 180 ]; do
                 git fetch origin "${GITHUB_REF_NAME}" --quiet
                 if git show "origin/${GITHUB_REF_NAME}:$NEXT_READY_MARKER" >/dev/null 2>&1; then
-                  echo "Slot $NEXT_SLOT is ready. The previous runner can exit."
+                  echo "Slot $NEXT_SLOT is ready at $NEXT_TUNNEL."
+                  echo "Transferring all players to $TARGET_HOST:$TARGET_PORT..."
+                  send_command "transfer $TARGET_HOST $TARGET_PORT @a"
+                  echo "::notice::Players were instructed to transfer to slot $NEXT_SLOT at $NEXT_TUNNEL."
+                  sleep 15
+                  cleanup_playit
+                  kill "$SERVER_PID" 2>/dev/null || true
+                  wait "$SERVER_PID" 2>/dev/null || true
+                  SERVER_PID=""
                   exit 0
                 fi
                 sleep 3
@@ -365,6 +364,5 @@ jobs:
             fi
             sleep 5
           done
-
           wait "$SERVER_PID" 2>/dev/null || true
           exit 0
