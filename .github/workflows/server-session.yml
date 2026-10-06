@@ -29,10 +29,23 @@ on:
         default: ""
         type: string
       max_runtime_minutes:
-        description: Maximum runtime before a restart attempt; GitHub caps jobs at 360 minutes
+        description: Maximum runtime before a server handoff; GitHub caps jobs at 360 minutes
         required: true
         default: 330
         type: number
+      server_slot:
+        description: Active server slot; A and B alternate during handoff
+        required: true
+        default: A
+        type: choice
+        options:
+          - A
+          - B
+      handoff_at:
+        description: Unix timestamp when the incoming slot should take over
+        required: false
+        default: ""
+        type: string
 
 permissions:
   contents: write
@@ -187,19 +200,46 @@ jobs:
             echo "GLIDE_WORLD_SAVED=$save_dir"
           }
 
-          trigger_restart() {
+          trigger_handoff() {
             export GH_TOKEN="${{ github.token }}"
+            if [ "${{ inputs.server_slot }}" = "A" ]; then
+              NEXT_SLOT="B"
+            else
+              NEXT_SLOT="A"
+            fi
+            HANDOFF_AT="$(( $(date +%s) + 120 ))"
             gh workflow run server-session.yml \
-              --ref "${GITHUB_REF_NAME}" \
+              --ref "${{ GITHUB_REF_NAME }}" \
               -f minecraft_version="${{ inputs.minecraft_version }}" \
               -f xmx_gb="${{ inputs.xmx_gb }}" \
               -f online_mode="${{ inputs.online_mode }}" \
               -f server_name="${{ inputs.server_name }}" \
               -f server_description="${{ inputs.server_description }}" \
-              -f max_runtime_minutes="${{ inputs.max_runtime_minutes }}"
-            echo "GLIDE_RESTART_TRIGGERED=true"
+              -f max_runtime_minutes="${{ inputs.max_runtime_minutes }}" \
+              -f server_slot="$NEXT_SLOT" \
+              -f handoff_at="$HANDOFF_AT"
+            echo "GLIDE_NEXT_SLOT=$NEXT_SLOT"
+            echo "GLIDE_HANDOFF_AT=$HANDOFF_AT"
+            echo "GLIDE_HANDOFF_TRIGGERED=true"
           }
 
+          mark_ready() {
+            local slot="${{ inputs.server_slot }}"
+            local marker="Server/Runtime/slot-" + "$slot" + "-ready"
+            mkdir -p "$(dirname "$marker")"
+            printf '%s
+' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$marker"
+            git config user.name "Glide Server Bot"
+            git config user.email "glide-server-bot@users.noreply.github.com"
+            git add "$marker"
+            git commit -m "Mark server slot $slot ready" || true
+            git push origin "HEAD:${{ GITHUB_REF_NAME }}" || true
+          }
+
+          clear_old_ready_marker() {
+            local slot="${{ inputs.server_slot }}"
+            rm -f "Server/Runtime/slot-" + "$slot" + "-ready"
+          }
           cleanup_playit() {
             docker rm -f glide-playit >/dev/null 2>&1 || true
           }
@@ -238,7 +278,15 @@ jobs:
               sleep 2
             done
 
-            echo "Starting Playit Docker agent..."
+            if [ -n "${{ inputs.handoff_at }}" ]; then
+              while [ "$(date +%s)" -lt "${{ inputs.handoff_at }}" ]; do
+                sleep 2
+              done
+              echo "Handoff time reached; starting Playit for slot ${{ inputs.server_slot }}."
+            else
+              echo "Starting Playit for the initial server slot..."
+            fi
+
             docker pull ghcr.io/playit-cloud/playit-agent:latest
             docker run -d --name glide-playit --network host -e SECRET_KEY="$PLAYIT_SECRET" ghcr.io/playit-cloud/playit-agent:latest
 
@@ -255,12 +303,16 @@ jobs:
 
             echo "Minecraft server: 127.0.0.1:25565"
             echo "Playit agent is running. The configured Playit Minecraft tunnel must target local port 25565."
+            mark_ready()
 
             while kill -0 "$SERVER_PID" 2>/dev/null; do
               ELAPSED="$(( $(date +%s) - START_EPOCH ))"
               if [ "$ELAPSED" -ge "$RESTART_WINDOW" ]; then
-                echo "GLIDE_RESTART_SOON=true"
-                trigger_restart
+                echo "GLIDE_HANDOFF_SOON=true"
+                echo "The server is preparing to swap. Progress may be lost from this point further."
+                echo "Saving the current world for the next server slot..."
+                save_world
+                trigger_handoff
                 kill "$SERVER_PID" 2>/dev/null || true
                 wait "$SERVER_PID" 2>/dev/null || true
                 exit 0
