@@ -41,11 +41,6 @@ on:
         options:
           - A
           - B
-      handoff_at:
-        description: Unix timestamp when the incoming slot should take over
-        required: false
-        default: ""
-        type: string
 
 permissions:
   contents: write
@@ -207,19 +202,18 @@ jobs:
             else
               NEXT_SLOT="A"
             fi
-            HANDOFF_AT="$(( $(date +%s) + 120 ))"
+
             gh workflow run server-session.yml \
-              --ref "${{ GITHUB_REF_NAME }}" \
+              --ref "${GITHUB_REF_NAME}" \
               -f minecraft_version="${{ inputs.minecraft_version }}" \
               -f xmx_gb="${{ inputs.xmx_gb }}" \
               -f online_mode="${{ inputs.online_mode }}" \
               -f server_name="${{ inputs.server_name }}" \
               -f server_description="${{ inputs.server_description }}" \
               -f max_runtime_minutes="${{ inputs.max_runtime_minutes }}" \
-              -f server_slot="$NEXT_SLOT" \
-              -f handoff_at="$HANDOFF_AT"
+              -f server_slot="$NEXT_SLOT"
+
             echo "GLIDE_NEXT_SLOT=$NEXT_SLOT"
-            echo "GLIDE_HANDOFF_AT=$HANDOFF_AT"
             echo "GLIDE_HANDOFF_TRIGGERED=true"
           }
 
@@ -227,98 +221,120 @@ jobs:
             local slot="${{ inputs.server_slot }}"
             local marker="Server/Runtime/slot-${slot}-ready"
             mkdir -p "$(dirname "$marker")"
-            printf '%s
-' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$marker"
+            printf '%s\\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$marker"
             git config user.name "Glide Server Bot"
             git config user.email "glide-server-bot@users.noreply.github.com"
             git add "$marker"
             git commit -m "Mark server slot $slot ready" || true
-            git push origin "HEAD:${{ GITHUB_REF_NAME }}" || true
+            git push origin "HEAD:${GITHUB_REF_NAME}" || true
           }
 
-          clear_old_ready_marker {
-            local slot="${{ inputs.server_slot }}"
-            rm -f "Server/Runtime/slot-${slot}-ready"
-          }
           cleanup_playit() {
             docker rm -f glide-playit >/dev/null 2>&1 || true
           }
 
-          trap 'cleanup_playit; save_world' EXIT
+          trap 'cleanup_playit; if [ -n "${SERVER_PID:-}" ] && kill -0 "$SERVER_PID" 2>/dev/null; then kill "$SERVER_PID" 2>/dev/null || true; wait "$SERVER_PID" 2>/dev/null || true; fi' EXIT
 
           if [ -z "${PLAYIT_SECRET:-}" ]; then
             echo "::error::PLAYIT_SECRET is not configured in GitHub Actions secrets."
             exit 1
           fi
+
           cd "$GITHUB_WORKSPACE/server"
-          START_EPOCH="$(date +%s)"
-          RESTART_WINDOW="$(( ${{ inputs.max_runtime_minutes }} * 60 - 300 ))"
-          while true; do
-            docker rm -f glide-playit >/dev/null 2>&1 || true
+          TOTAL_RUNTIME_SECONDS="$(( ${{ inputs.max_runtime_minutes }} * 60 ))"
+          HANDOFF_LEAD_SECONDS=180
+          if [ "$TOTAL_RUNTIME_SECONDS" -le "$HANDOFF_LEAD_SECONDS" ]; then
+            HANDOFF_LEAD_SECONDS="$(( TOTAL_RUNTIME_SECONDS / 2 ))"
+          fi
+          HANDOFF_AFTER_SECONDS="$(( TOTAL_RUNTIME_SECONDS - HANDOFF_LEAD_SECONDS ))"
+          echo "Server slot ${{ inputs.server_slot }} will hand off after $HANDOFF_AFTER_SECONDS seconds."
 
-            java -Xmx${{ inputs.xmx_gb }}G -Xms512M -jar server.jar nogui &
-            SERVER_PID=$!
+          docker rm -f glide-playit >/dev/null 2>&1 || true
 
-            echo "Waiting for Minecraft to listen on 127.0.0.1:25565..."
-            for attempt in $(seq 1 60); do
-              if (echo >/dev/tcp/127.0.0.1/25565) >/dev/null 2>&1; then
-                echo "Minecraft is listening on 127.0.0.1:25565."
-                break
-              fi
-              if ! kill -0 "$SERVER_PID" 2>/dev/null; then
-                echo "::error::Minecraft exited before opening port 25565."
-                wait "$SERVER_PID" 2>/dev/null || true
-                exit 1
-              fi
-              if [ "$attempt" -eq 60 ]; then
-                echo "::error::Minecraft did not open port 25565 within 120 seconds."
-                tail -n 100 "$GITHUB_WORKSPACE/server/logs/latest.log" 2>/dev/null || true
-                exit 1
-              fi
-              sleep 2
-            done
+          java -Xmx${{ inputs.xmx_gb }}G -Xms512M -jar server.jar nogui &
+          SERVER_PID=$!
 
-            if [ -n "${{ inputs.handoff_at }}" ]; then
-              while [ "$(date +%s)" -lt "${{ inputs.handoff_at }}" ]; do
-                sleep 2
-              done
-              echo "Handoff time reached; starting Playit for slot ${{ inputs.server_slot }}."
-            else
-              echo "Starting Playit for the initial server slot..."
+          echo "Waiting for Minecraft to listen on 127.0.0.1:25565..."
+          for attempt in $(seq 1 60); do
+            if (echo >/dev/tcp/127.0.0.1/25565) >/dev/null 2>&1; then
+              echo "Minecraft is listening on 127.0.0.1:25565."
+              break
             fi
-
-            docker pull ghcr.io/playit-cloud/playit-agent:latest
-            docker run -d --name glide-playit --network host -e SECRET_KEY="$PLAYIT_SECRET" ghcr.io/playit-cloud/playit-agent:latest
-
-            sleep 8
-            echo "--- Playit agent status ---"
-            docker ps --filter name=glide-playit --format 'status={{.Status}}'
-            echo "--- Playit agent logs ---"
-            docker logs --tail 100 glide-playit 2>&1 || true
-
-            if ! docker ps --format '{{.Names}}' | grep -qx 'glide-playit'; then
-              echo "::error::Playit Docker agent stopped immediately."
+            if ! kill -0 "$SERVER_PID" 2>/dev/null; then
+              echo "::error::Minecraft exited before opening port 25565."
+              wait "$SERVER_PID" 2>/dev/null || true
               exit 1
             fi
-
-            echo "Minecraft server: 127.0.0.1:25565"
-            echo "Playit agent is running. The configured Playit Minecraft tunnel must target local port 25565."
-            mark_ready
-
-            while kill -0 "$SERVER_PID" 2>/dev/null; do
-              ELAPSED="$(( $(date +%s) - START_EPOCH ))"
-              if [ "$ELAPSED" -ge "$RESTART_WINDOW" ]; then
-                echo "GLIDE_HANDOFF_SOON=true"
-                echo "The server is preparing to swap. Progress may be lost from this point further."
-                echo "Saving the current world for the next server slot..."
-                save_world
-                trigger_handoff
-                kill "$SERVER_PID" 2>/dev/null || true
-                wait "$SERVER_PID" 2>/dev/null || true
-                exit 0
-              fi
-              sleep 60
-            done
-            wait "$SERVER_PID" 2>/dev/null || true
-            exit 0
+            if [ "$attempt" -eq 60 ]; then
+              echo "::error::Minecraft did not open port 25565 within 120 seconds."
+              tail -n 100 "$GITHUB_WORKSPACE/server/logs/latest.log" 2>/dev/null || true
+              exit 1
+            fi
+            sleep 2
           done
+
+          docker pull ghcr.io/playit-cloud/playit-agent:latest
+          docker run -d --name glide-playit --network host -e SECRET_KEY="$PLAYIT_SECRET" ghcr.io/playit-cloud/playit-agent:latest
+          sleep 8
+
+          echo "--- Playit agent status ---"
+          docker ps --filter name=glide-playit --format 'status={{.Status}}'
+          echo "--- Playit agent logs ---"
+          docker logs --tail 100 glide-playit 2>&1 || true
+
+          if ! docker ps --format '{{.Names}}' | grep -qx 'glide-playit'; then
+            echo "::error::Playit Docker agent stopped immediately."
+            exit 1
+          fi
+
+          echo "Minecraft server: 127.0.0.1:25565"
+          echo "Playit agent is running for slot ${{ inputs.server_slot }}."
+          mark_ready
+
+          HANDOFF_START="$(date +%s)"
+          while kill -0 "$SERVER_PID" 2>/dev/null; do
+            ELAPSED="$(( $(date +%s) - HANDOFF_START ))"
+            if [ "$ELAPSED" -ge "$HANDOFF_AFTER_SECONDS" ]; then
+              echo "GLIDE_HANDOFF_SOON=true"
+              echo "The server is preparing to swap. Progress may be lost from this point further."
+              echo "Stopping the current Playit agent before handing the tunnel to the next runner."
+
+              # Minecraft is stopped first so its normal shutdown flushes the world.
+              cleanup_playit
+              kill "$SERVER_PID" 2>/dev/null || true
+              wait "$SERVER_PID" 2>/dev/null || true
+              SERVER_PID=""
+
+              echo "Saving the clean world snapshot for the next server slot..."
+              save_world
+
+              trigger_handoff
+
+              if [ "${{ inputs.server_slot }}" = "A" ]; then
+                NEXT_SLOT="B"
+              else
+                NEXT_SLOT="A"
+              fi
+
+              NEXT_READY_MARKER="Server/Runtime/slot-$NEXT_SLOT-ready"
+              echo "Waiting for slot $NEXT_SLOT to start its Minecraft server and connect its Playit agent..."
+
+              elapsed=0
+              while [ "$elapsed" -lt 180 ]; do
+                git fetch origin "${GITHUB_REF_NAME}" --quiet
+                if git show "origin/${GITHUB_REF_NAME}:$NEXT_READY_MARKER" >/dev/null 2>&1; then
+                  echo "Slot $NEXT_SLOT is ready. The previous runner can exit."
+                  exit 0
+                fi
+                sleep 3
+                elapsed="$((elapsed + 3))"
+              done
+
+              echo "::error::Next server slot did not become ready within 180 seconds."
+              exit 1
+            fi
+            sleep 5
+          done
+
+          wait "$SERVER_PID" 2>/dev/null || true
+          exit 0
