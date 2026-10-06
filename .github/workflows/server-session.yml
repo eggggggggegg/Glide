@@ -176,14 +176,19 @@ jobs:
           TARGET_PORT="${NEXT_TUNNEL##*:}"
           echo "Next slot $NEXT_SLOT tunnel: $NEXT_TUNNEL"
 
-          LATEST_SAVE="$(find "$WORLD_ROOT" -mindepth 1 -maxdepth 1 -type d | sort | tail -n 1 || true)"
+          MINECRAFT_VERSION="${{ inputs.minecraft_version }}"
+          VERSION_WORLD_ROOT="$WORLD_ROOT/$MINECRAFT_VERSION"
+          mkdir -p "$VERSION_WORLD_ROOT"
+          echo "World storage for Minecraft $MINECRAFT_VERSION: $VERSION_WORLD_ROOT"
+
+          LATEST_SAVE="$(find "$VERSION_WORLD_ROOT" -mindepth 1 -maxdepth 1 -type d | sort | tail -n 1 || true)"
           if [ -n "$LATEST_SAVE" ] && [ -d "$LATEST_SAVE/world" ] && [ -s "$LATEST_SAVE/world/level.dat" ]; then
             echo "GLIDE_WORLD_MODE=restore"
             rm -rf "$GITHUB_WORKSPACE/server/world"
             cp -a "$LATEST_SAVE/world" "$GITHUB_WORKSPACE/server/world"
             echo "GLIDE_WORLD_RESTORED=$LATEST_SAVE"
           else
-            echo "No saved world found; Minecraft will generate a new world."
+            echo "No saved world found for Minecraft $MINECRAFT_VERSION; Minecraft will generate a new world."
             rm -rf "$GITHUB_WORKSPACE/server/world"
             echo "GLIDE_WORLD_MODE=new"
             echo "GLIDE_WORLD_RESTORED=none"
@@ -191,7 +196,7 @@ jobs:
 
           save_world() {
             local stamp="$(date -u +%Y%m%dT%H%M%SZ)"
-            local save_dir="$WORLD_ROOT/$stamp-${{ github.run_id }}"
+            local save_dir="$VERSION_WORLD_ROOT/$stamp-${{ github.run_id }}"
             mkdir -p "$save_dir"
             if [ -d "$GITHUB_WORKSPACE/server/world" ]; then
               cp -a "$GITHUB_WORKSPACE/server/world" "$save_dir/world"
