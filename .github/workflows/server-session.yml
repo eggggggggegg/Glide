@@ -351,6 +351,9 @@ jobs:
                 git fetch origin "${GITHUB_REF_NAME}" --quiet
                 if git show "origin/${GITHUB_REF_NAME}:$NEXT_READY_MARKER" >/dev/null 2>&1; then
                   echo "Slot $NEXT_SLOT is ready at $NEXT_TUNNEL."
+                  echo "Preparing players for transfer to $TARGET_HOST:$TARGET_PORT..."
+                  send_command "title @a title {\"text\":\"Swapping...\"}"
+                  sleep 10
                   echo "Transferring all players to $TARGET_HOST:$TARGET_PORT..."
                   send_command "say The server is transferring you to the next server..."
                   send_command "transfer $TARGET_HOST $TARGET_PORT @a"
