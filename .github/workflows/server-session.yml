@@ -283,7 +283,9 @@ jobs:
             HANDOFF_LEAD_SECONDS="$(( TOTAL_RUNTIME_SECONDS / 2 ))"
           fi
           HANDOFF_AFTER_SECONDS="$(( TOTAL_RUNTIME_SECONDS - HANDOFF_LEAD_SECONDS ))"
+          HANDOFF_WAIT_SECONDS=300
           echo "Server slot ${{ inputs.server_slot }} will hand off after $HANDOFF_AFTER_SECONDS seconds."
+          echo "Handoff readiness wait: ${HANDOFF_WAIT_SECONDS}s."
 
           docker rm -f glide-playit >/dev/null 2>&1 || true
 
@@ -346,10 +348,11 @@ jobs:
               trigger_handoff
 
               NEXT_READY_MARKER="Server/Runtime/slot-$NEXT_SLOT-ready"
-              elapsed=0
-              while [ "$elapsed" -lt 180 ]; do
-                git fetch origin "${GITHUB_REF_NAME}" --quiet
-                if git show "origin/${GITHUB_REF_NAME}:$NEXT_READY_MARKER" >/dev/null 2>&1; then
+              HANDOFF_DEADLINE="$(( $(date +%s) + HANDOFF_WAIT_SECONDS ))"
+              echo "Waiting up to ${HANDOFF_WAIT_SECONDS}s for $NEXT_READY_MARKER."
+              while [ "$(date +%s)" -lt "$HANDOFF_DEADLINE" ]; do
+                if git fetch origin "${GITHUB_REF_NAME}" --quiet; then
+                  if git show "origin/${GITHUB_REF_NAME}:$NEXT_READY_MARKER" >/dev/null 2>&1; then
                   echo "Slot $NEXT_SLOT is ready at $NEXT_TUNNEL."
                   echo "Preparing players for transfer to $TARGET_HOST:$TARGET_PORT..."
                   send_command "title @a title {\"text\":\"Swapping...\"}"
@@ -378,12 +381,12 @@ jobs:
                   wait "$SERVER_PID" 2>/dev/null || true
                   SERVER_PID=""
                   exit 0
+                  fi
                 fi
                 sleep 3
-                elapsed="$((elapsed + 3))"
               done
 
-              echo "::error::Next server slot did not become ready within 180 seconds."
+              echo "::error::Next server slot did not become ready within ${HANDOFF_WAIT_SECONDS} seconds."
               exit 1
             fi
             sleep 5
