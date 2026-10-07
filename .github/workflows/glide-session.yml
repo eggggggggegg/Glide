@@ -480,8 +480,8 @@ jobs:
           mkdir -p /home/runner/glide-minecraft/mods
           mkdir -p /home/runner/glide-minecraft/datapacks
           shopt -s nullglob
-          MOD_SOURCE="$GITHUB_WORKSPACE/Client/mods/${{ inputs.loader }}"
-          DATAPACK_SOURCE="$GITHUB_WORKSPACE/Client/datapacks/${{ inputs.loader }}"
+          MOD_SOURCE="$GITHUB_WORKSPACE/Client/mods/${{ inputs.minecraft_version }}/${{ inputs.loader }}"
+          DATAPACK_SOURCE="$GITHUB_WORKSPACE/Client/${{ inputs.minecraft_version }}/datapacks/${{ inputs.loader }}"
 
           # Datapacks are world-scoped in Java Edition. Keep a loader-specific
           # staging directory, then copy valid packs into every existing world.
@@ -784,45 +784,73 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          SAVE_NAME="${{ inputs.minecraft_version }}-${{ inputs.loader }}-${{ github.run_id }}"
-          SAVE_ROOT="$GITHUB_WORKSPACE/game/saving/$SAVE_NAME"
-          mkdir -p "$SAVE_ROOT"
+          VERSION="${{ inputs.minecraft_version }}"
+          LOADER="${{ inputs.loader }}"
+          WORLD_ROOT="$GITHUB_WORKSPACE/Client/$VERSION/worlds"
+          RESOURCEPACK_ROOT="$GITHUB_WORKSPACE/Client/$VERSION/resourcepacks"
+          MOD_ROOT="$GITHUB_WORKSPACE/Client/mods/$VERSION/$LOADER"
+          DATAPACK_ROOT="$GITHUB_WORKSPACE/Client/$VERSION/datapacks/$LOADER"
+          SETTINGS_ROOT="$GITHUB_WORKSPACE/Client/$VERSION/settings/$LOADER"
+          mkdir -p "$WORLD_ROOT" "$RESOURCEPACK_ROOT" "$MOD_ROOT" "$DATAPACK_ROOT" "$SETTINGS_ROOT"
 
-          for item in \
-            saves \
-            config \
-            resourcepacks \
-            shaderpacks \
-            mods \
-            datapacks \
-            options.txt \
-            optionsof.txt \
-            servers.dat \
-            launcher_profiles.json \
-            usercache.json \
-            server-resource-packs.json; do
+          if [ -d /home/runner/glide-minecraft/saves ]; then
+            for world in /home/runner/glide-minecraft/saves/*; do
+              [ -d "$world" ] || continue
+              name="$(basename "$world")"
+              rm -rf "$WORLD_ROOT/$name"
+              cp -a "$world" "$WORLD_ROOT/$name"
+              echo "GLIDE_WORLD_SAVED=$name"
+            done
+          fi
+
+          if [ -d /home/runner/glide-minecraft/resourcepacks ]; then
+            for pack in /home/runner/glide-minecraft/resourcepacks/*; do
+              [ -e "$pack" ] || continue
+              name="$(basename "$pack")"
+              rm -rf "$RESOURCEPACK_ROOT/$name"
+              cp -a "$pack" "$RESOURCEPACK_ROOT/$name"
+              echo "GLIDE_RESOURCEPACK_SAVED=$name"
+            done
+          fi
+
+          if [ -d /home/runner/glide-minecraft/mods ]; then
+            find "$MOD_ROOT" -mindepth 1 -maxdepth 1 -exec rm -rf {} +
+            for mod in /home/runner/glide-minecraft/mods/*; do
+              [ -f "$mod" ] || continue
+              cp -a "$mod" "$MOD_ROOT/$(basename "$mod")"
+              echo "GLIDE_MOD_SAVED=$(basename "$mod")"
+            done
+          fi
+
+          if [ -d /home/runner/glide-minecraft/datapacks ]; then
+            find "$DATAPACK_ROOT" -mindepth 1 -maxdepth 1 -exec rm -rf {} +
+            for pack in /home/runner/glide-minecraft/datapacks/*; do
+              [ -e "$pack" ] || continue
+              cp -a "$pack" "$DATAPACK_ROOT/$(basename "$pack")"
+            done
+          fi
+
+          for item in config shaderpacks options.txt optionsof.txt servers.dat launcher_profiles.json usercache.json server-resource-packs.json; do
             src="/home/runner/glide-minecraft/$item"
             if [ -e "$src" ]; then
-              mkdir -p "$(dirname "$SAVE_ROOT/$item")"
-              cp -a "$src" "$SAVE_ROOT/$item"
+              rm -rf "$SETTINGS_ROOT/$item"
+              cp -a "$src" "$SETTINGS_ROOT/$item"
             fi
           done
 
-          if [ -d /home/runner/glide-minecraft/saves ]; then
-            find /home/runner/glide-minecraft/saves -maxdepth 2 -type f | sort | head -n 50
-          fi
-
           git config user.name "Glide Save Bot"
           git config user.email "glide-save-bot@users.noreply.github.com"
-          git add "game/saving/$SAVE_NAME"
+          git add "Client/$VERSION" "Client/mods/$VERSION"
           if git diff --cached --quiet; then
             echo "GLIDE_SAVE_COMMIT=skipped"
             exit 0
           fi
-          git commit -m "Save Glide session $SAVE_NAME"
+          git commit -m "Save Glide client state $VERSION $LOADER"
           git push origin "HEAD:${GITHUB_REF_NAME}"
-          echo "GLIDE_SAVE_COMMIT=$SAVE_NAME"
-          echo "GLIDE_SAVE_PATH=$SAVE_ROOT"
+          echo "GLIDE_SAVE_COMMIT=$VERSION-$LOADER"
+          echo "GLIDE_WORLD_PATH=$WORLD_ROOT"
+          echo "GLIDE_RESOURCEPACK_PATH=$RESOURCEPACK_ROOT"
+          echo "GLIDE_MOD_PATH=$MOD_ROOT"
 
       - name: Keep Minecraft session alive
         shell: bash
