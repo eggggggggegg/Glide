@@ -365,6 +365,37 @@ best-plugin</textarea>
             </label>
           </div>
 
+          <div class="status-box">
+            <div class="small">Client files</div>
+            <p class="muted">
+              Files are saved using the selected Minecraft version. Mods and datapacks are also separated by loader.
+            </p>
+            <div class="row">
+              <label>
+                Mods
+                <input id="clientModsInput" type="file" multiple accept=".jar,.zip,.mrpack" />
+              </label>
+              <label>
+                Resource packs
+                <input id="clientResourcepacksInput" type="file" multiple accept=".zip" />
+              </label>
+            </div>
+            <div class="row">
+              <label>
+                Datapack folder
+                <input id="clientDatapacksInput" type="file" webkitdirectory directory multiple />
+              </label>
+              <label>
+                World folder
+                <input id="clientWorldsInput" type="file" webkitdirectory directory multiple />
+              </label>
+            </div>
+            <div class="button-row">
+              <button id="saveClientFilesBtn" type="button">Save client files to repo</button>
+            </div>
+            <div id="clientFilesStatus" class="muted">No client files selected.</div>
+          </div>
+
           <label>
             Client view
             <select id="clientViewInput">
@@ -427,6 +458,7 @@ best-plugin</textarea>
         selectedRepo: null,
         selectedMode: null,
         uploadedPlugins: [],
+        uploadedClientFiles: [],
         defaultBranch: 'main',
         lastRunId: null,
         clientSession: null
@@ -484,6 +516,73 @@ best-plugin</textarea>
           binary += String.fromCharCode(bytes[i]);
         }
         return btoa(binary);
+      }
+
+      function clientVersion() {
+        return document.getElementById('versionInput').value.trim() || '1.21.5';
+      }
+
+      function clientLoader() {
+        return document.getElementById('loaderInput').value;
+      }
+
+      function safeRepoPath(value) {
+        return String(value || '')
+          .replace(/\\/g, '/')
+          .split('/')
+          .filter(part => part && part !== '.' && part !== '..')
+          .map(part => part.replace(/[<>:"|?*\\x00-\\x1F]/g, '_'))
+          .join('/');
+      }
+
+      async function uploadClientFiles(files, basePath, label) {
+        if (!state.selectedRepo) throw new Error('Pick the Glide repo first.');
+        if (!state.token) throw new Error('Add a GitHub token first.');
+        if (!files || !files.length) throw new Error('Choose at least one file or folder first.');
+
+        const [owner, repo] = state.selectedRepo.split('/');
+        const version = clientVersion();
+        const loader = clientLoader();
+        let count = 0;
+
+        for (const file of files) {
+          const relative = safeRepoPath(file.webkitRelativePath || file.name);
+          if (!relative) continue;
+
+          const path = basePath
+            .replace('{version}', encodeURIComponent(version))
+            .replace('{loader}', encodeURIComponent(loader))
+            .replace('{relative}', relative.split('/').map(encodeURIComponent).join('/'));
+
+          const encoded = b64Encode(await file.arrayBuffer());
+          const response = await fetch(
+            `https://api.github.com/repos/${owner}/${repo}/contents/${path}`,
+            {
+              method: 'PUT',
+              headers: {
+                Authorization: `Bearer ${state.token}`,
+                Accept: 'application/vnd.github+json',
+                'X-GitHub-Api-Version': '2022-11-28',
+                'Content-Type': 'application/json'
+              },
+              body: JSON.stringify({
+                message: `Save client ${label}: ${relative}`,
+                content: encoded,
+                branch: state.defaultBranch || 'main'
+              })
+            }
+          );
+
+          if (!response.ok) {
+            const errorText = await response.text();
+            throw new Error(`${relative}: ${response.status} ${errorText}`);
+          }
+
+          count++;
+          state.uploadedClientFiles.push(path);
+        }
+
+        return count;
       }
 
       function updatePluginList() {
@@ -735,6 +834,39 @@ best-plugin</textarea>
 
         throw new Error('The client did not become ready within 15 minutes. Use “Check / Load Client” to manually check the latest client run.');
       }
+
+      document.getElementById('saveClientFilesBtn').addEventListener('click', async () => {
+        const status = document.getElementById('clientFilesStatus');
+        const jobs = [
+          [document.getElementById('clientModsInput').files, 'Client/mods/{version}/{loader}/{relative}', 'mods'],
+          [document.getElementById('clientResourcepacksInput').files, 'Client/{version}/resourcepacks/{relative}', 'resource packs'],
+          [document.getElementById('clientDatapacksInput').files, 'Client/{version}/datapacks/{loader}/{relative}', 'datapacks'],
+          [document.getElementById('clientWorldsInput').files, 'Client/{version}/worlds/{relative}', 'worlds']
+        ];
+
+        const selected = jobs.filter(([files]) => files && files.length);
+        if (!selected.length) {
+          alert('Choose at least one client file or folder first.');
+          return;
+        }
+
+        const button = document.getElementById('saveClientFilesBtn');
+        button.disabled = true;
+        status.textContent = 'Saving client files...';
+
+        try {
+          let total = 0;
+          for (const [files, path, label] of selected) {
+            total += await uploadClientFiles(files, path, label);
+          }
+          status.textContent = `${total} client file(s) saved for Minecraft ${clientVersion()} / ${clientLoader()}.`;
+        } catch (error) {
+          status.textContent = error.message || 'Client file upload failed.';
+          alert(error.message || 'Client file upload failed.');
+        } finally {
+          button.disabled = false;
+        }
+      });
 
       document.getElementById('addPluginsBtn').addEventListener('click', async () => {
         const files = document.getElementById('pluginFilesInput').files;
