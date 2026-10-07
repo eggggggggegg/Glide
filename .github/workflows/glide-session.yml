@@ -429,27 +429,45 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          SAVE_ROOT="$GITHUB_WORKSPACE/game/saving"
-          mkdir -p /home/runner/glide-minecraft
-          if [ -d "$SAVE_ROOT" ]; then
-            LATEST_SAVE="$(find "$SAVE_ROOT" -mindepth 1 -maxdepth 1 -type d | sort | tail -n 1 || true)"
-            if [ -n "$LATEST_SAVE" ]; then
-              shopt -s dotglob
-              for item in "$LATEST_SAVE"/*; do
-                [ -e "$item" ] || continue
-                name="$(basename "$item")"
-                target="/home/runner/glide-minecraft/$name"
-                rm -rf "$target"
-                cp -a "$item" "$target"
-              done
-              echo "GLIDE_SAVE_RESTORED=$LATEST_SAVE"
-            else
-              echo "GLIDE_SAVE_RESTORED=none"
-            fi
-          else
-            echo "GLIDE_SAVE_RESTORED=none"
+          VERSION="${{ inputs.minecraft_version }}"
+          LOADER="${{ inputs.loader }}"
+          WORLD_ROOT="$GITHUB_WORKSPACE/Client/$VERSION/worlds"
+          RESOURCEPACK_ROOT="$GITHUB_WORKSPACE/Client/$VERSION/resourcepacks"
+          LEGACY_SAVE_ROOT="$GITHUB_WORKSPACE/game/saving"
+          mkdir -p /home/runner/glide-minecraft/saves /home/runner/glide-minecraft/resourcepacks
+
+          restored_worlds=0
+          if [ -d "$WORLD_ROOT" ]; then
+            shopt -s dotglob
+            for world in "$WORLD_ROOT"/*; do
+              [ -d "$world" ] || continue
+              name="$(basename "$world")"
+              rm -rf "/home/runner/glide-minecraft/saves/$name"
+              cp -a "$world" "/home/runner/glide-minecraft/saves/$name"
+              echo "GLIDE_WORLD_RESTORED=$name"
+              restored_worlds=$((restored_worlds + 1))
+            done
+          fi
+          echo "GLIDE_WORLD_COUNT=$restored_worlds"
+
+          if [ -d "$RESOURCEPACK_ROOT" ]; then
+            shopt -s dotglob
+            for pack in "$RESOURCEPACK_ROOT"/*; do
+              [ -e "$pack" ] || continue
+              name="$(basename "$pack")"
+              rm -rf "/home/runner/glide-minecraft/resourcepacks/$name"
+              cp -a "$pack" "/home/runner/glide-minecraft/resourcepacks/$name"
+              echo "GLIDE_RESOURCEPACK_RESTORED=$name"
+            done
           fi
 
+          if [ "$restored_worlds" -eq 0 ] && [ -d "$LEGACY_SAVE_ROOT" ]; then
+            LATEST_SAVE="$(find "$LEGACY_SAVE_ROOT" -mindepth 1 -maxdepth 1 -type d | sort | tail -n 1 || true)"
+            if [ -n "$LATEST_SAVE" ] && [ -d "$LATEST_SAVE/saves" ]; then
+              cp -a "$LATEST_SAVE/saves/." /home/runner/glide-minecraft/saves/
+              echo "GLIDE_LEGACY_WORLDS_MIGRATED=$LATEST_SAVE"
+            fi
+          fi
       - name: Install Java and Minecraft launcher
         shell: bash
         run: |
