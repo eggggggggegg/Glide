@@ -107,7 +107,7 @@ onlyShowSecureChat:false
 saveChatDrafts:false
 panoramaScrollSpeed:1.0
 telemetryOptInExtra:false
-onboardAccessibility:false
+onboardAccessibility:true
 menuBackgroundBlurriness:5
 startedCleanly:true
 musicToast:"never"
