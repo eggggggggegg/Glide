@@ -364,6 +364,17 @@ best-plugin</textarea>
               <input id="renderHeightInput" type="number" min="180" value="720" />
             </label>
           </div>
+
+          <label>
+            Client view
+            <select id="clientViewInput">
+              <option value="embedded" selected>View Minecraft inside this HTML</option>
+              <option value="cloudflare">Open the Cloudflare client page</option>
+            </select>
+          </label>
+          <p class="muted">
+            Embedded mode keeps the Minecraft client in this page when the streaming service allows iframe embedding.
+          </p>
         </div>
 
         <div class="button-row">
@@ -396,6 +407,13 @@ best-plugin</textarea>
           <div><strong>URL:</strong> <span id="sessionUrl" class="ok">-</span></div>
           <div><strong>Username:</strong> <span id="sessionUser">-</span></div>
           <div><strong>Password:</strong> <span id="sessionPassword">-</span></div>
+          <div class="button-row">
+            <button id="openSessionBtn" type="button">Open client</button>
+          </div>
+          <div id="embeddedClientBox" class="hidden" style="margin-top:12px;">
+            <p class="muted">If the browser permits embedded streaming, Minecraft will appear below.</p>
+            <iframe id="embeddedClientFrame" title="Glide Minecraft client" allow="autoplay; fullscreen; gamepad; microphone" style="width:100%; min-height:600px; border:1px solid var(--line); border-radius:8px; background:#000;"></iframe>
+          </div>
         </div>
       </div>
     </div>
@@ -430,6 +448,9 @@ best-plugin</textarea>
       const sessionUrl = document.getElementById('sessionUrl');
       const sessionUser = document.getElementById('sessionUser');
       const sessionPassword = document.getElementById('sessionPassword');
+      const openSessionBtn = document.getElementById('openSessionBtn');
+      const embeddedClientBox = document.getElementById('embeddedClientBox');
+      const embeddedClientFrame = document.getElementById('embeddedClientFrame');
 
       function setLaunchProgress(percent, text) {
         launchProgressBar.style.width = `${percent}%`;
@@ -494,6 +515,7 @@ best-plugin</textarea>
             render_width: Number(document.getElementById('renderWidthInput').value || 1280),
             render_height: Number(document.getElementById('renderHeightInput').value || 720),
             offline_username: document.getElementById('offlineUserInput').value,
+            client_view: document.getElementById('clientViewInput').value,
             runner_label: 'ubuntu-latest'
           };
         } else {
@@ -620,12 +642,13 @@ best-plugin</textarea>
         };
 
         setLaunchProgress(20, 'Dispatching workflow...');
-        launchDetails.textContent = `Starting ${workflowFile} on ${state.selectedRepo}...`;
+        launchDetails.textContent = \`Starting \${workflowFile} on \${state.selectedRepo}...\`;
 
-        const response = await fetch(`https://api.github.com/repos/${owner}/${repo}/actions/workflows/${workflowFile}/dispatches`, {
+        const dispatchStartedAt = Date.now();
+        const response = await fetch(\`https://api.github.com/repos/\${owner}/\${repo}/actions/workflows/\${workflowFile}/dispatches\`, {
           method: 'POST',
           headers: {
-            Authorization: `Bearer ${state.token}`,
+            Authorization: \`Bearer \${state.token}\`,
             Accept: 'application/vnd.github+json',
             'X-GitHub-Api-Version': '2022-11-28',
             'Content-Type': 'application/json',
@@ -635,45 +658,74 @@ best-plugin</textarea>
 
         if (response.status !== 204) {
           const text = await response.text();
-          throw new Error(`Workflow dispatch failed: ${response.status} ${text}`);
+          throw new Error(\`Workflow dispatch failed: \${response.status} \${text}\`);
         }
 
-        setLaunchProgress(35, 'Workflow queued. Waiting for the run to start...');
+        setLaunchProgress(30, 'Workflow queued. Waiting for the client to start...');
 
-        for (let attempt = 0; attempt < 60; attempt += 1) {
+        const deadline = Date.now() + 10 * 60 * 1000;
+        let run = null;
+
+        while (Date.now() < deadline) {
           await new Promise(resolve => setTimeout(resolve, 5000));
+
           const latest = await fetchLatestRunId(workflowFile);
-          const run = latest;
+          if (!latest || !latest.id) continue;
+
+          const latestCreated = Date.parse(latest.created_at || latest.run_started_at || '');
+          if (latestCreated && latestCreated + 30000 < dispatchStartedAt) {
+            setLaunchProgress(32, 'Workflow queued. Waiting for GitHub to create the run...');
+            continue;
+          }
+
+          run = latest;
           state.lastRunId = run.id;
+
+          if (state.selectedMode === 'client') {
+            try {
+              const session = await parseClientSessionFromLogs(run.id);
+              if (session && session.url) {
+                state.clientSession = session;
+                sessionDetails.classList.remove('hidden');
+                sessionUrl.textContent = session.url;
+                sessionUser.textContent = session.username || 'glide';
+                sessionPassword.textContent = session.password || 'not-found';
+
+                launchDetails.textContent =
+                  \`Run ID: \${run.id}\nStatus: \${run.status}\nURL: \${run.html_url}\n\nClient session is ready.\`;
+
+                const viewMode = config.settings.client_view || 'embedded';
+                if (viewMode === 'embedded') {
+                  embeddedClientBox.classList.remove('hidden');
+                  embeddedClientFrame.src = session.url;
+                  openSessionBtn.textContent = 'Open Cloudflare page';
+                } else {
+                  openSessionBtn.textContent = 'Open client';
+                }
+
+                setLaunchProgress(100, 'Client ready.');
+                return;
+              }
+            } catch (_) {
+              // Live log archives can briefly be unavailable while a run starts.
+            }
+          }
 
           if (run.status === 'completed') {
             setLaunchProgress(100, 'Workflow finished.');
-            launchDetails.textContent = `Run ${run.id} finished with conclusion: ${run.conclusion || 'unknown'}\n${run.html_url}`;
-
-            if (state.selectedMode === 'client') {
-              try {
-                const details = await parseClientSessionFromLogs(run.id);
-                if (details) {
-                  state.clientSession = details;
-                  sessionDetails.classList.remove('hidden');
-                  sessionUrl.textContent = details.url || 'not found';
-                  sessionUser.textContent = details.username || 'glide';
-                  sessionPassword.textContent = details.password || 'not found';
-                  launchDetails.textContent += `\n\nClient session details:\nURL: ${details.url || 'not found'}\nUsername: ${details.username || 'glide'}\nPassword: ${details.password || 'not found'}`;
-                }
-              } catch (error) {
-                launchDetails.textContent += `\nLog parsing was unavailable: ${error.message}`;
-              }
-            }
-            return;
+            launchDetails.textContent = \`Run \${run.id} finished with conclusion: \${run.conclusion || 'unknown'}\n\${run.html_url}\`;
+            throw new Error(state.selectedMode === 'client'
+              ? 'The client workflow finished before its streaming URL became available.'
+              : 'The workflow finished.');
           }
 
-          const progress = 35 + ((attempt + 1) / 60) * 60;
-          setLaunchProgress(Math.min(95, progress), `Run is ${run.status}. Waiting for completion...`);
-          launchDetails.textContent = `Run ID: ${run.id}\nStatus: ${run.status}\nURL: ${run.html_url}`;
+          const elapsed = Math.max(0, Date.now() - dispatchStartedAt);
+          const progress = 30 + Math.min(65, (elapsed / (10 * 60 * 1000)) * 65);
+          setLaunchProgress(Math.min(95, progress), \`Run is \${run.status}. Waiting for the client...\`);
+          launchDetails.textContent = \`Run ID: \${run.id}\nStatus: \${run.status}\nURL: \${run.html_url}\n\nWaiting up to 10 minutes for the client session to become ready.\`;
         }
 
-        throw new Error('The workflow took too long to finish. Check the Actions tab for status.');
+        throw new Error('The client did not become ready within 10 minutes. Check the Actions tab for the workflow logs.');
       }
 
       document.getElementById('addPluginsBtn').addEventListener('click', async () => {
@@ -844,6 +896,22 @@ best-plugin</textarea>
         const config = buildConfigObject();
         configOutput.textContent = JSON.stringify(config, null, 2);
         outputPanel.classList.remove('hidden');
+      });
+
+      openSessionBtn.addEventListener('click', () => {
+        if (!state.clientSession || !state.clientSession.url) {
+          alert('The client session is not ready yet.');
+          return;
+        }
+
+        const viewMode = document.getElementById('clientViewInput').value;
+        if (viewMode === 'embedded') {
+          embeddedClientBox.classList.remove('hidden');
+          embeddedClientFrame.src = state.clientSession.url;
+          openSessionBtn.textContent = 'Open Cloudflare page';
+        } else {
+          window.open(state.clientSession.url, '_blank', 'noopener,noreferrer');
+        }
       });
 
       document.getElementById('launchBtn').addEventListener('click', async () => {
