@@ -642,13 +642,13 @@ best-plugin</textarea>
         };
 
         setLaunchProgress(20, 'Dispatching workflow...');
-        launchDetails.textContent = \`Starting \${workflowFile} on \${state.selectedRepo}...\`;
+        launchDetails.textContent = `Starting ${workflowFile} on ${state.selectedRepo}...`;
 
         const dispatchStartedAt = Date.now();
-        const response = await fetch(\`https://api.github.com/repos/\${owner}/\${repo}/actions/workflows/\${workflowFile}/dispatches\`, {
+        const response = await fetch(`https://api.github.com/repos/${owner}/${repo}/actions/workflows/${workflowFile}/dispatches`, {
           method: 'POST',
           headers: {
-            Authorization: \`Bearer \${state.token}\`,
+            Authorization: `Bearer ${state.token}`,
             Accept: 'application/vnd.github+json',
             'X-GitHub-Api-Version': '2022-11-28',
             'Content-Type': 'application/json',
@@ -658,7 +658,7 @@ best-plugin</textarea>
 
         if (response.status !== 204) {
           const text = await response.text();
-          throw new Error(\`Workflow dispatch failed: \${response.status} \${text}\`);
+          throw new Error(`Workflow dispatch failed: ${response.status} ${text}`);
         }
 
         setLaunchProgress(30, 'Workflow queued. Waiting for the client to start...');
@@ -692,7 +692,7 @@ best-plugin</textarea>
                 sessionPassword.textContent = session.password || 'not-found';
 
                 launchDetails.textContent =
-                  \`Run ID: \${run.id}\nStatus: \${run.status}\nURL: \${run.html_url}\n\nClient session is ready.\`;
+                  `Run ID: ${run.id}\nStatus: ${run.status}\nURL: ${run.html_url}\n\nClient session is ready.`;
 
                 const viewMode = config.settings.client_view || 'embedded';
                 if (viewMode === 'embedded') {
@@ -713,7 +713,7 @@ best-plugin</textarea>
 
           if (run.status === 'completed') {
             setLaunchProgress(100, 'Workflow finished.');
-            launchDetails.textContent = \`Run \${run.id} finished with conclusion: \${run.conclusion || 'unknown'}\n\${run.html_url}\`;
+            launchDetails.textContent = `Run ${run.id} finished with conclusion: ${run.conclusion || 'unknown'}\n${run.html_url}`;
             throw new Error(state.selectedMode === 'client'
               ? 'The client workflow finished before its streaming URL became available.'
               : 'The workflow finished.');
@@ -721,8 +721,8 @@ best-plugin</textarea>
 
           const elapsed = Math.max(0, Date.now() - dispatchStartedAt);
           const progress = 30 + Math.min(65, (elapsed / (10 * 60 * 1000)) * 65);
-          setLaunchProgress(Math.min(95, progress), \`Run is \${run.status}. Waiting for the client...\`);
-          launchDetails.textContent = \`Run ID: \${run.id}\nStatus: \${run.status}\nURL: \${run.html_url}\n\nWaiting up to 10 minutes for the client session to become ready.\`;
+          setLaunchProgress(Math.min(95, progress), `Run is ${run.status}. Waiting for the client...`);
+          launchDetails.textContent = `Run ID: ${run.id}\nStatus: ${run.status}\nURL: ${run.html_url}\n\nWaiting up to 10 minutes for the client session to become ready.`;
         }
 
         throw new Error('The client did not become ready within 10 minutes. Check the Actions tab for the workflow logs.');
