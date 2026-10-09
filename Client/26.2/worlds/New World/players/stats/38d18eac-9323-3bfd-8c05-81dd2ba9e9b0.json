@@ -1,0 +1,73 @@
+{
+  "stats": {
+    "minecraft:killed_by": {
+      "minecraft:enderman": 1,
+      "minecraft:ender_dragon": 1
+    },
+    "minecraft:custom": {
+      "minecraft:talked_to_villager": 104,
+      "minecraft:time_since_rest": 406719,
+      "minecraft:walk_one_cm": 65645,
+      "minecraft:mob_kills": 1,
+      "minecraft:damage_taken": 750,
+      "minecraft:play_time": 414000,
+      "minecraft:damage_dealt": 49,
+      "minecraft:jump": 314,
+      "minecraft:time_since_death": 406661,
+      "minecraft:drop": 27,
+      "minecraft:sprint_one_cm": 44948,
+      "minecraft:inspect_dispenser": 1,
+      "minecraft:fall_one_cm": 9995,
+      "minecraft:total_world_time": 415359,
+      "minecraft:fly_one_cm": 129472,
+      "minecraft:crouch_one_cm": 2842,
+      "minecraft:sneak_time": 779,
+      "minecraft:deaths": 2
+    },
+    "minecraft:picked_up": {
+      "minecraft:leaf_litter": 90,
+      "minecraft:dirt": 27,
+      "minecraft:netherite_spear": 1,
+      "minecraft:dandelion": 1,
+      "minecraft:wildflowers": 42,
+      "minecraft:torch": 3,
+      "minecraft:iron_ingot": 2320,
+      "minecraft:purple_carpet": 32
+    },
+    "minecraft:dropped": {
+      "minecraft:netherite_spear": 1,
+      "minecraft:mace": 1,
+      "minecraft:yellow_dye": 22,
+      "minecraft:purple_carpet": 14,
+      "minecraft:dirt": 2
+    },
+    "minecraft:mined": {
+      "minecraft:short_grass": 10,
+      "minecraft:tall_grass": 5,
+      "minecraft:wildflowers": 15,
+      "minecraft:leaf_litter": 27,
+      "minecraft:grass_block": 27
+    },
+    "minecraft:crafted": {
+      "minecraft:yellow_dye": 38
+    },
+    "minecraft:used": {
+      "minecraft:oak_fence": 1,
+      "minecraft:grass_block": 3,
+      "minecraft:leaf_litter": 82,
+      "minecraft:lava_bucket": 39,
+      "minecraft:wildflowers": 3,
+      "minecraft:observer": 10,
+      "minecraft:redstone": 19,
+      "minecraft:dispenser": 16,
+      "minecraft:dirt_path": 1,
+      "minecraft:iron_block": 31,
+      "minecraft:mace": 3,
+      "minecraft:iron_bars": 8,
+      "minecraft:ender_eye": 15,
+      "minecraft:end_portal_frame": 15,
+      "minecraft:dirt": 29
+    }
+  },
+  "DataVersion": 4903
+}
